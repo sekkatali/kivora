@@ -1,28 +1,22 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { T, type Lang } from '@/lib/i18n';
 
-const CLIPS = [
-  { tone: '#e0527a', tone2: '#a8335a', hook: 'Je l’applique le soir…', tag: 'Beauté' },
-  { tone: '#3d63c9', tone2: '#253f8a', hook: 'Unboxing sans coupe', tag: 'Tech' },
-  { tone: '#c98a1a', tone2: '#8a5c0c', hook: 'Le vrai prix du plat', tag: 'Food' },
-  { tone: '#1f8a8a', tone2: '#125c5c', hook: 'Ma bouteille du matin', tag: 'Fitness' },
-];
-const NOTIFS = [
-  { ic: '✓', t: 'Profil vérifié', d: 'Ta fiche est visible des marques' },
-  { ic: 'DH', t: 'Nouvelle réservation', d: 'Pack 3 vidéos · 1 750 DH' },
-  { ic: '▶', t: 'Vidéo validée', d: 'Paiement envoyé sur ton compte' },
-];
+const TONES = [['#e0527a', '#a8335a'], ['#3d63c9', '#253f8a'], ['#c98a1a', '#8a5c0c'], ['#1f8a8a', '#125c5c']];
 
 /** Téléphone du héros : une vidéo UGC qui défile et des notifications qui arrivent. */
-export default function HeroPhone() {
+export default function HeroPhone({ lang = 'fr' }: { lang?: Lang }) {
+  const p = T[lang].phone;
+  const NOTIFS = p.notifs.map(([ic, t, d]) => ({ ic, t, d }));
+  const CLIPS = TONES.map(([tone, tone2], i) => ({ tone, tone2, hook: p.clips[i], tag: p.tags[i] }));
   const [k, setK] = useState(0);
   const [n, setN] = useState(1);
   useEffect(() => {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { setN(NOTIFS.length); return; }
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { setN(3); return; }
     const t = setInterval(() => {
       if (document.hidden) return;
-      setK((x) => (x + 1) % CLIPS.length);
-      setN((x) => (x >= NOTIFS.length ? 1 : x + 1));
+      setK((x) => (x + 1) % TONES.length);
+      setN((x) => (x >= 3 ? 1 : x + 1));
     }, 2600);
     return () => clearInterval(t);
   }, []);
@@ -45,7 +39,7 @@ export default function HeroPhone() {
           </div>
         ))}
       </div>
-      <span className="hp-cap">Exemple</span>
+      <span className="hp-cap">{p.example}</span>
     </div>
   );
 }

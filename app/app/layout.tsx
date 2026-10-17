@@ -10,6 +10,8 @@ const text = localFont({
   variable: '--font-text', display: 'swap',
 });
 
+const arabic = localFont({ src: './fonts/NotoKufiArabic.woff2', weight: '400 800', variable: '--font-ar', display: 'swap', preload: false });
+
 const SITE = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 const PIXEL = process.env.NEXT_PUBLIC_META_PIXEL_ID;
 
@@ -25,7 +27,7 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, view
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr" className={`${display.variable} ${text.variable}`}>
+    <html lang="fr" className={`${display.variable} ${text.variable} ${arabic.variable}`}>
       <body>
         {children}
         <Attribution />

@@ -5,7 +5,7 @@ import { CITIES, NICHES, SECTORS, BUDGETS, dh, initials, toneFor, frError, WHATS
 import { track } from '@/lib/track';
 
 type Brand = { id: string; company: string; contact_name: string | null; phone: string | null; website: string | null; ice: string | null; sector: string | null; monthly_budget: string | null; status: 'waitlist' | 'active' };
-type Card = { id: string; first_name: string; last_initial: string; city: string | null; languages: string[]; niches: string[]; instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; bio: string | null; min_price: number | null; packages: { title: string; description: string | null; price_mad: number }[] };
+type Card = { id: string; first_name: string; last_initial: string; city: string | null; languages: string[]; niches: string[]; instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; bio: string | null; min_price: number | null; packages: { key: string; title: string; price_mad: number }[] };
 
 export default function BrandDashboard({ brand }: { brand: Brand }) {
   const supabase = useMemo(() => createClient(), []);
@@ -16,6 +16,9 @@ export default function BrandDashboard({ brand }: { brand: Brand }) {
   const [city, setCity] = useState('');
   const [niche, setNiche] = useState('');
   const [max, setMax] = useState('');
+  const [picked, setPicked] = useState<Record<string, string[]>>({});
+  const pick = (id: string, key: string) => setPicked((x) => { const cur = x[id] || []; return { ...x, [id]: cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key] }; });
+  const total = (c: Card) => (c.min_price || 0) + c.packages.filter((p) => (picked[c.id] || []).includes(p.key)).reduce((a, p) => a + p.price_mad, 0);
 
   useEffect(() => {
     if (b.status !== 'active') return;
@@ -32,11 +35,14 @@ export default function BrandDashboard({ brand }: { brand: Brand }) {
     setSaved(b); setMsg('Informations enregistrées');
   }
   const set = (k: keyof Brand, v: string) => { setB((x) => ({ ...x, [k]: v })); setMsg(''); };
-  const ask = (c: Card, p: Card['packages'][number]) => {
-    track('Contact', { content_name: p.title, value: p.price_mad, currency: 'MAD' });
-    const text = `Bonjour Kivora, ${b.company} souhaite réserver « ${p.title} » (${dh(p.price_mad)}) avec ${c.first_name} ${c.last_initial}. (${c.city || ''})`;
+  const ask = (c: Card) => {
+    const chosen = c.packages.filter((p) => (picked[c.id] || []).includes(p.key));
+    const sum = total(c);
+    track('Contact', { content_name: 'reservation', value: sum, currency: 'MAD' });
+    const text = `Bonjour Kivora, ${b.company} souhaite réserver une vidéo avec ${c.first_name} ${c.last_initial}. (${c.city || ''})${chosen.length ? ` Options : ${chosen.map((p) => p.title).join(', ')}.` : ''} Total affiché : ${dh(sum)}.`;
     window.open(WHATSAPP ? `https://wa.me/${WHATSAPP}?text=${encodeURIComponent(text)}` : `mailto:?subject=${encodeURIComponent('Réservation Kivora')}&body=${encodeURIComponent(text)}`, '_blank');
   };
+
   const shown = (list || []).filter((c) => !max || (c.min_price ?? 0) <= Number(max));
 
   return (
@@ -60,7 +66,7 @@ export default function BrandDashboard({ brand }: { brand: Brand }) {
               <article className="cc" key={c.id}>
                 <div className="hd"><span className="ava" style={{ background: toneFor(c.id) }}>{initials(c.first_name, c.last_initial)}</span>
                   <span><b>{c.first_name} {c.last_initial}.</b><span>{c.city} · {c.languages.join(', ')}</span></span>
-                  {c.min_price ? <span className="from">dès {dh(c.min_price)}</span> : null}</div>
+                  {c.min_price ? <span className="from">{dh(c.min_price)}</span> : null}</div>
                 <div className="chips" style={{ margin: 0 }}>{c.niches.map((n) => <span className="chip" key={n} style={{ background: 'var(--ui-surface)' }}>{n}</span>)}</div>
                 {c.bio ? <p className="bio">{c.bio}</p> : null}
                 <div className="links">
@@ -68,10 +74,16 @@ export default function BrandDashboard({ brand }: { brand: Brand }) {
                   {c.instagram ? <a className="link" href={`https://instagram.com/${c.instagram}`} target="_blank" rel="noopener nofollow">Instagram</a> : null}
                   {c.tiktok ? <a className="link" href={`https://tiktok.com/@${c.tiktok}`} target="_blank" rel="noopener nofollow">TikTok</a> : null}
                 </div>
-                <div className="pkl">{c.packages.map((p, i) => (
-                  <div key={i}><span>{p.title}{p.description ? <small>{p.description}</small> : null}</span>
-                    <button className="btn sm ink" onClick={() => ask(c, p)}>{dh(p.price_mad)}</button></div>
-                ))}</div>
+                <div className="pkl">
+                  <div><span>Vidéo UGC<small>jusqu’à 30 s, 2 révisions</small></span><b>{dh(c.min_price)}</b></div>
+                  {c.packages.map((p) => (
+                    <label key={p.key} className="optcheck" style={{ background: 'var(--ui-surface)', borderRadius: 10, padding: '9px 12px', justifyContent: 'space-between' }}>
+                      <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input type="checkbox" checked={(picked[c.id] || []).includes(p.key)} onChange={() => pick(c.id, p.key)} />{p.title}</span>
+                      <b style={{ fontWeight: 500 }}>+ {dh(p.price_mad)}</b>
+                    </label>
+                  ))}
+                </div>
+                <button className="btn ink" onClick={() => ask(c)}>Réserver · {dh(total(c))}</button>
               </article>
             ))}
           </div>

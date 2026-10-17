@@ -393,3 +393,24 @@ revoke execute on function public.handle_new_user()        from public, anon, au
 -- 2. Puis exécute dans Supabase > SQL Editor, avec ton adresse :
 --    update public.profiles set role = 'admin' where email = 'ton.adresse@exemple.com';
 --    Ta fiche d'inscription reste en base mais n'est plus comptée nulle part.
+
+-- ============================================================================
+-- Mise à jour : un seul prix par créateur (creators.desired_rate)
+-- + des options qui s'ajoutent au total (table creator_packages, colonne option_key).
+-- ============================================================================
+alter table public.creator_packages add column if not exists option_key text;
+create unique index if not exists creator_packages_option_uidx on public.creator_packages (creator_id, option_key);
+
+create or replace function public.option_label(k text)
+returns text language sql immutable set search_path = ''
+as $$
+  select case k
+    when 'rushes'    then 'Rushes bruts'
+    when 'hooks'     then '3 accroches en plus'
+    when 'ads'       then 'Diffusion depuis mon compte'
+    when 'formats'   then 'Formats en plus'
+    when 'express'   then 'Livraison express'
+    when 'subtitles' then 'Sous-titres incrustés'
+  end;
+$$;
+-- La version à jour de handle_new_user, get_catalog et admin_stats (avec les options) est appliquée sur le projet Supabase (migration kivora_08_prix_unique_options).

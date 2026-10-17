@@ -23,13 +23,15 @@ const STEPS = [
   },
   {
     tab: 'Réservez', time: '1 clic', title: 'Réservez au prix affiché',
-    text: 'Choisissez un tarif dans la grille du créateur : une vidéo, un pack, ou la diffusion depuis son compte. Le total exact s’affiche avant de payer.',
+    text: 'Chaque créateur affiche un prix unique pour une vidéo. Ajoutez les options dont vous avez besoin : rushes, accroches en plus, diffusion depuis son compte. Le total exact s’affiche avant de payer.',
     pts: ['Carte marocaine ou virement', 'Paiement retenu jusqu’à validation', 'Facture avec votre ICE'],
     ui: () => (<>
       <div className="grid-ui">
-        <div><span>Vidéo UGC 30 s<small>1 vidéo, 2 révisions</small></span><b>650 DH</b></div>
-        <div className="sel"><span>Pack 3 vidéos<small>3 accroches différentes</small></span><b>1 750 DH</b></div>
-        <div><span>Vidéo + diffusion depuis son compte<small>Partnership Ads 30 jours</small></span><b>900 DH</b></div>
+        <div><span>Vidéo UGC<small>jusqu’à 30 s, 2 révisions</small></span><b>650 DH</b></div>
+        <div className="sel"><span>+ 3 accroches en plus<small>3 débuts différents à tester</small></span><b>150 DH</b></div>
+        <div className="sel"><span>+ Diffusion depuis son compte<small>Partnership ou Spark Ads, 30 jours</small></span><b>250 DH</b></div>
+        <div><span>+ Rushes bruts<small>toutes les prises</small></span><b>100 DH</b></div>
+        <div className="sel"><span><b>Total</b></span><b>1 050 DH</b></div>
       </div>
     </>),
   },

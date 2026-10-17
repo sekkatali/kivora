@@ -4,7 +4,7 @@ import { useState } from 'react';
 const FEATS: [string, string, [string, string][]][] = [
   ['Pour les marques', 'Chaque vidéo validée donne une licence publicitaire à vie, sur tous vos canaux.', [
     ['Catalogue filtrable', 'Ville, langue, niche, prix : le catalogue se resserre à chaque filtre.'],
-    ['Grilles de tarifs publiques', 'Chaque créateur affiche ses prix. Pas de devis à attendre.'],
+    ['Prix affichés', 'Un prix par créateur, des options claires. Pas de devis à attendre.'],
     ['Total exact avant paiement', 'Vous voyez le montant final avant de payer, sans surprise.'],
     ['Paiement retenu', 'Votre argent est bloqué jusqu’à votre validation.'],
     ['Deux révisions', 'Commentaires horodatés directement sur la vidéo.'],
@@ -18,7 +18,7 @@ const FEATS: [string, string, [string, string][]][] = [
     ['Plusieurs utilisateurs', 'Votre équipe marketing partage le même espace.'],
     ['Espace agence', 'Un espace par client, validation par le client.']]],
   ['Pour les créateurs', 'Inscription gratuite. Le créateur fixe son prix et il est payé dès la validation.', [
-    ['Ta grille, tes prix', 'Tu publies tes tarifs et tu les changes quand tu veux.'],
+    ['Ton prix, tes options', 'Tu fixes ton prix et tes options, tu les changes quand tu veux.'],
     ['Payé à la validation', 'Virement dès que la marque valide ta vidéo.'],
     ['Profil vérifié', 'Les marques réservent en confiance un profil contrôlé par l’équipe.'],
     ['Factures automatiques', 'Une facture à ton nom par marque.'],

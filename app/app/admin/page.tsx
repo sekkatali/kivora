@@ -15,7 +15,7 @@ export default async function AdminPage() {
     supabase.rpc('admin_stats'),
     supabase.from('creators').select('*, profiles!inner(email, role)').eq('profiles.role', 'creator').order('created_at', { ascending: false }).limit(5000),
     supabase.from('brands').select('*, profiles!inner(email, role)').eq('profiles.role', 'brand').order('created_at', { ascending: false }).limit(2000),
-    supabase.from('creator_packages').select('creator_id, title, price_mad, active').eq('archived', false).limit(20000),
+    supabase.from('creator_packages').select('creator_id, title, price_mad, active, option_key').eq('archived', false).limit(20000),
   ]);
   const error = stats.error?.message || creators.error?.message || brands.error?.message || pkgs.error?.message || '';
   return (

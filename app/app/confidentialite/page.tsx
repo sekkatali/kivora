@@ -22,7 +22,7 @@ export default function Confidentialite() {
             <li>Mesure d’audience publicitaire : source de la visite (paramètres UTM) et, si activé, pixel Meta, pour mesurer l’efficacité de nos campagnes.</li>
           </ul>
           <h2>Destinataires</h2>
-          <p>L’équipe Kivora. Les marques actives voient uniquement le prénom, l’initiale du nom, la ville, les langues, les niches, les réseaux, la présentation et la grille de tarifs des créateurs vérifiés ; jamais leur téléphone ni leur e-mail. Hébergement : Supabase (Union européenne) et Vercel.</p>
+          <p>L’équipe Kivora. Les marques actives voient uniquement le prénom, l’initiale du nom, la ville, les langues, les niches, les réseaux, la présentation, le prix et les options des créateurs vérifiés ; jamais leur téléphone ni leur e-mail. Hébergement : Supabase (Union européenne) et Vercel.</p>
           <h2>Durée de conservation</h2>
           <p>Tant que le compte est actif, puis 3 ans après le dernier contact, sauf obligation légale (facturation : 10 ans).</p>
           <h2>Vos droits</h2>

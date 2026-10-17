@@ -17,7 +17,7 @@ type Brand = {
   id: string; company: string; contact_name: string | null; phone: string | null; website: string | null; ice: string | null; sector: string | null;
   monthly_budget: string | null; status: 'waitlist' | 'active'; utm: Record<string, string>; created_at: string; profiles: { email: string | null };
 };
-type Pkg = { creator_id: string; title: string; price_mad: number; active: boolean };
+type Pkg = { creator_id: string; title: string; price_mad: number; active: boolean; option_key: string | null };
 type Stats = Record<string, number | Record<string, number>>;
 
 /* Palier P1 du plan de lancement */
@@ -70,7 +70,7 @@ export default function AdminDashboard({ stats, creators, brands, packages, erro
   const nicheA = count(approved, 'niches');
   const cityA = count(approved, 'city');
   const aePct = approved.length ? Math.round((approved.filter((c) => c.ae_status === 'oui' || c.ae_status === 'en_cours').length / approved.length) * 100) : 0;
-  const complete = cr.filter((c) => c.portfolio_url && (pkBy[c.id] || []).some((p) => p.active)).length;
+  const complete = cr.filter((c) => c.portfolio_url && c.desired_rate).length;
   const paid = cr.filter((c) => /meta|facebook|instagram|fb|ig/i.test(c.utm?.utm_source || '')).length;
   const cpl = Number(spend) > 0 && paid ? Number(spend) / paid : null;
   const gates = [
@@ -118,9 +118,16 @@ export default function AdminDashboard({ stats, creators, brands, packages, erro
     <main className="appwrap">
       <div className="apphead"><h1>Tableau de bord</h1><p>Préinscriptions, vérification des créateurs et accès des marques.</p></div>
 
+      {pending > 0 ? (
+        <a className="status pending" href="#liste" onClick={() => { setTab('creators'); setFilter('pending'); }} style={{ textDecoration: 'none' }}>
+          <span className="ic" aria-hidden="true">{pending}</span>
+          <div><b>{pending} créateur{pending > 1 ? 's' : ''} à vérifier</b><p>Ouvre la liste, clique sur « Examiner », regarde ses vidéos puis « Vérifier » ou « Refuser ».</p></div>
+        </a>
+      ) : null}
+
       <div className="tiles">
         <div className="hi"><b>{cr.length}</b><span>créateurs préinscrits</span></div>
-        <div><b>{complete}</b><span>profils complets (vidéos + tarif)</span></div>
+        <div><b>{complete}</b><span>profils complets (vidéos + prix)</span></div>
         <div><b>{approved.length}</b><span>vérifiés · {pending} à vérifier</span></div>
         <div><b>{br.length}</b><span>marques · {br.filter((b) => b.status === 'active').length} actives</span></div>
       </div>
@@ -157,6 +164,7 @@ export default function AdminDashboard({ stats, creators, brands, packages, erro
           <div className="dist">{cityA.length ? cityA.slice(0, 8).map(([n, v]) => <div key={n}><span>{n}</span><span className="meter"><i className={v >= GATE.perCity ? 'ok' : ''} style={{ width: `${Math.min(100, (v / GATE.perCity) * 100)}%` }} /></span><span>{v}</span></div>) : <p className="small" style={{ color: 'var(--muted)' }}>Aucun créateur vérifié.</p>}</div></section>
       </div>
 
+      <h2 id="liste" className="sec-h" style={{ fontSize: 26, scrollMarginTop: 16 }}>Vérification des créateurs et accès des marques</h2>
       <div className="toolbar">
         <div className="seg" role="group" aria-label="Liste">
           <button aria-pressed={tab === 'creators'} onClick={() => setTab('creators')}>Créateurs ({cr.length})</button>
@@ -172,9 +180,9 @@ export default function AdminDashboard({ stats, creators, brands, packages, erro
       </div>
 
       {tab === 'creators' ? (
-        rows.length === 0 ? <p className="empty">Aucun créateur dans cette liste.</p> : (
+        rows.length === 0 ? <p className="empty">{cr.length === 0 ? 'Aucune préinscription pour l’instant. Dès qu’un créateur s’inscrit sur l’accueil, il apparaît ici avec le statut « À vérifier ».' : 'Aucun créateur dans cette liste.'}</p> : (
           <div className="tbl"><table>
-            <thead><tr><th>Créateur</th><th>Ville</th><th>Niches</th><th>Réseaux</th><th>Tarif</th><th>Auto-entr.</th><th>Statut</th><th>Inscrit</th></tr></thead>
+            <thead><tr><th>Créateur</th><th>Ville</th><th>Niches</th><th>Réseaux</th><th>Prix</th><th>Auto-entr.</th><th>Statut</th><th>Inscrit</th><th /></tr></thead>
             <tbody>{rows.map((c) => {
               const isOpen = open === c.id;
               return [
@@ -187,14 +195,15 @@ export default function AdminDashboard({ stats, creators, brands, packages, erro
                   <td>{c.ae_status ? AE_SHORT[c.ae_status] : '—'}</td>
                   <td><span className={`tag ${ST_TAG[c.status]}`}>{ST_LABEL[c.status]}</span></td>
                   <td>{fmtDate(c.created_at)}<span className="sub">{c.utm?.utm_source || 'direct'}</span></td>
+                  <td><button className={`btn sm ${isOpen ? 'quiet' : 'ink'}`} onClick={() => { setOpen(isOpen ? null : c.id); setNote(c.admin_note || ''); }}>{isOpen ? 'Fermer' : c.status === 'pending' ? 'Examiner' : 'Modifier'}</button></td>
                 </tr>,
                 isOpen ? (
-                  <tr key={c.id + '-d'} className="open"><td colSpan={8}>
+                  <tr key={c.id + '-d'} className="open"><td colSpan={9}>
                     <dl className="detail">
                       <div><dt>WhatsApp</dt><dd>{c.phone ? <a className="link" href={wa(c.phone)} target="_blank" rel="noopener">{c.phone}</a> : '—'}</dd></div>
                       <div><dt>Langues</dt><dd>{c.languages.join(', ') || '—'}</dd></div>
                       <div><dt>Portfolio</dt><dd>{c.portfolio_url ? <a className="link" href={c.portfolio_url} target="_blank" rel="noopener nofollow">Ouvrir</a> : '—'}</dd></div>
-                      <div><dt>Grille</dt><dd>{(pkBy[c.id] || []).map((p) => `${p.title} · ${dh(p.price_mad)}${p.active ? '' : ' (masqué)'}`).join(' — ') || '—'}</dd></div>
+                      <div><dt>Options</dt><dd>{(pkBy[c.id] || []).filter((p) => p.option_key && p.active).map((p) => `${p.title} +${dh(p.price_mad)}`).join(' · ') || 'Aucune'}</dd></div>
                       <div><dt>Parrainé par</dt><dd>{c.referred_by || '—'} · code {c.referral_code}</dd></div>
                       <div><dt>Campagne</dt><dd>{[c.utm?.utm_campaign, c.utm?.utm_content].filter(Boolean).join(' / ') || '—'}</dd></div>
                       <div className="wide"><dt>Présentation</dt><dd>{c.bio || '—'}</dd></div>

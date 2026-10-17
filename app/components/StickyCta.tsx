@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 
 /** Bouton fixe sur mobile, masqué quand le formulaire est à l'écran. */
-export default function StickyCta() {
+export default function StickyCta({ label = 'Je me préinscris · 2 min' }: { label?: string }) {
   const [show, setShow] = useState(false);
   useEffect(() => {
     const form = document.getElementById('preinscription');
@@ -19,7 +19,7 @@ export default function StickyCta() {
   }, []);
   return (
     <div className={`sticky-cta${show ? ' on' : ''}`} aria-hidden={!show}>
-      <a className="btn ink big" href="#preinscription" tabIndex={show ? 0 : -1}>Je me préinscris · 2 min</a>
+      <a className="btn ink big" href="#preinscription" tabIndex={show ? 0 : -1}>{label}</a>
     </div>
   );
 }

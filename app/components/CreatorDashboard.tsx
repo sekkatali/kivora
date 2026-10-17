@@ -3,16 +3,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { CITIES, NICHES, LANGUAGES, frError, dh, WHATSAPP } from '@/lib/data';
 import { cleanHandle, cleanPhone, phoneOk } from './CreatorSignup';
+import { OPTIONS } from '@/lib/i18n';
 
 type Creator = {
   id: string; first_name: string; last_name: string; phone: string | null; city: string | null; languages: string[]; niches: string[];
   instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; desired_rate: number | null;
   ae_status: string | null; bio: string | null; status: 'pending' | 'approved' | 'rejected'; admin_note: string | null; referral_code: string | null;
 };
-type Pkg = { id: string; title: string; description: string | null; price_mad: number; active: boolean; position: number; _dirty?: boolean };
+type Pkg = { id: string; title: string; description: string | null; price_mad: number; active: boolean; archived?: boolean; position: number; option_key: string | null };
 
 const STATUS = {
-  pending: { ic: '…', t: 'Profil en cours de vérification', d: 'L’équipe regarde ton profil. Complète-le pour passer plus vite : un lien vers tes vidéos et une grille de tarifs.' },
+  pending: { ic: '…', t: 'Profil en cours de vérification', d: 'L’équipe regarde ton profil. Complète-le pour passer plus vite : un lien vers tes vidéos et tes options.' },
   approved: { ic: '✓', t: 'Profil vérifié', d: 'Tu fais partie des créateurs Kivora. Ton profil sera visible des marques dès l’ouverture du catalogue.' },
   rejected: { ic: '!', t: 'Profil non retenu pour l’instant', d: 'Ajoute de nouvelles vidéos et mets ton profil à jour : on pourra le revoir.' },
 };
@@ -35,15 +36,6 @@ export default function CreatorDashboard({ creator, packages, referrals }: { cre
     set(k, c[k].includes(v) ? c[k].filter((x) => x !== v) : c[k].length >= max ? c[k] : [...c[k], v]);
   const dirty = JSON.stringify(c) !== JSON.stringify(saved);
 
-  const activePk = pk.filter((p) => p.active);
-  const checks = [
-    ['Tes réseaux renseignés', !!(c.instagram || c.tiktok)],
-    ['Un lien vers tes vidéos', !!c.portfolio_url],
-    ['Une présentation de 2 lignes', (c.bio || '').trim().length >= 40],
-    ['Au moins 2 tarifs dans ta grille', activePk.length >= 2],
-    ['Ton statut auto-entrepreneur', c.ae_status === 'oui' || c.ae_status === 'en_cours'],
-  ] as const;
-  const score = checks.filter((x) => x[1]).length;
 
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
@@ -65,44 +57,54 @@ export default function CreatorDashboard({ creator, packages, referrals }: { cre
     setC(next); setSaved(next); say('Profil enregistré');
   }
 
-  const setP = (id: string, k: keyof Pkg, v: string | number | boolean) => setPk((l) => l.map((p) => (p.id === id ? { ...p, [k]: v, _dirty: true } : p)));
-  async function savePkg(p: Pkg) {
-    const price = Math.round(Number(p.price_mad));
-    if (p.title.trim().length < 2) return say('Donne un nom à ce tarif');
-    if (!price || price < 50 || price > 100000) return say('Prix entre 50 et 100 000 DH');
-    const { error } = await supabase.from('creator_packages').update({ title: p.title.trim().slice(0, 80), description: p.description?.trim() || null, price_mad: price, active: p.active }).eq('id', p.id);
-    if (error) return say(frError(error.message));
-    setPk((l) => l.map((x) => (x.id === p.id ? { ...x, price_mad: price, _dirty: false } : x)));
-    say('Tarif enregistré');
+  type O = { on: boolean; price: string };
+  const initOpts = () => Object.fromEntries(OPTIONS.map((o) => {
+    const row = pk.find((p) => p.option_key === o.key && !p.archived);
+    return [o.key, { on: !!row?.active, price: String(row?.price_mad ?? o.suggest) }];
+  })) as Record<string, O>;
+  const [price, setPrice] = useState(String(c.desired_rate ?? ''));
+  const [opts, setOpts] = useState<Record<string, O>>(initOpts);
+  const [savedP, setSavedP] = useState(() => JSON.stringify({ price: String(c.desired_rate ?? ''), opts: initOpts() }));
+  const [pErr, setPErr] = useState('');
+  const [busyP, setBusyP] = useState(false);
+  const priceDirty = JSON.stringify({ price, opts }) !== savedP;
+  const setOpt = (k: string, patch: Partial<O>) => { setOpts((x) => ({ ...x, [k]: { ...x[k], ...patch } })); setPErr(''); };
+  const okPrice = (v: string) => { const n = Number(v); return Number.isFinite(n) && n >= 50 && n <= 100000; };
+
+  async function savePricing() {
+    if (!okPrice(price)) return setPErr('Prix entre 50 et 100 000 DH.');
+    if (OPTIONS.some((o) => opts[o.key].on && !okPrice(opts[o.key].price))) return setPErr('Prix d’option entre 50 et 100 000 DH.');
+    setBusyP(true);
+    const rate = Math.round(Number(price));
+    const { error } = await supabase.from('creators').update({ desired_rate: rate }).eq('id', c.id);
+    if (error) { setBusyP(false); return setPErr(frError(error.message)); }
+    const rows = OPTIONS.map((o, i) => ({ o, i })).filter(({ o }) => opts[o.key].on || pk.some((p) => p.option_key === o.key))
+      .map(({ o, i }) => ({ creator_id: c.id, option_key: o.key, title: o.fr[0], description: o.fr[1], price_mad: okPrice(opts[o.key].price) ? Math.round(Number(opts[o.key].price)) : o.suggest, active: opts[o.key].on, archived: false, position: i }));
+    if (rows.length) {
+      const { data, error: e2 } = await supabase.from('creator_packages').upsert(rows, { onConflict: 'creator_id,option_key' }).select();
+      if (e2) { setBusyP(false); return setPErr(frError(e2.message)); }
+      setPk((l) => [...l.filter((p) => !p.option_key), ...((data as Pkg[]) || [])]);
+    }
+    setBusyP(false);
+    setC((x) => ({ ...x, desired_rate: rate })); setSaved((x) => ({ ...x, desired_rate: rate }));
+    setSavedP(JSON.stringify({ price, opts })); say('Prix enregistré');
   }
-  async function toggleActive(p: Pkg) {
-    const { error } = await supabase.from('creator_packages').update({ active: !p.active }).eq('id', p.id);
-    if (error) return say(frError(error.message));
-    setPk((l) => l.map((x) => (x.id === p.id ? { ...x, active: !p.active } : x)));
-  }
-  async function archive(p: Pkg) {
-    if (!confirm(`Retirer « ${p.title} » de ta grille ?`)) return;
-    const { error } = await supabase.from('creator_packages').update({ archived: true, active: false }).eq('id', p.id);
-    if (error) return say(frError(error.message));
-    setPk((l) => l.filter((x) => x.id !== p.id));
-  }
-  async function addPkg() {
-    if (pk.length >= 6) return say('6 tarifs maximum');
-    const base = activePk[0]?.price_mad || c.desired_rate || 500;
-    const suggestion = pk.length === 0 ? { title: 'Vidéo UGC 30 s', description: '1 vidéo, 2 révisions', price_mad: base }
-      : pk.length === 1 ? { title: 'Pack 3 vidéos', description: '3 accroches différentes', price_mad: Math.round(base * 2.7 / 10) * 10 }
-      : { title: 'Nouveau tarif', description: '', price_mad: base };
-    const { data, error } = await supabase.from('creator_packages').insert({ creator_id: c.id, ...suggestion, position: pk.length }).select().single();
-    if (error) return say(frError(error.message));
-    setPk((l) => [...l, data as Pkg]);
-  }
+
+  const checks = [
+    ['Tes réseaux renseignés', !!(c.instagram || c.tiktok)],
+    ['Un lien vers tes vidéos', !!c.portfolio_url],
+    ['Une présentation de 2 lignes', (c.bio || '').trim().length >= 40],
+    ['Ton prix et au moins une option', !!c.desired_rate && Object.values(opts).some((o) => o.on)],
+    ['Ton statut auto-entrepreneur', c.ae_status === 'oui' || c.ae_status === 'en_cours'],
+  ] as const;
+  const score = checks.filter((x) => x[1]).length;
 
   const link = origin && c.referral_code ? `${origin}/?ref=${c.referral_code}` : '';
   const st = STATUS[c.status];
 
   return (
     <main className="appwrap">
-      <div className="apphead"><h1>Salut {c.first_name || 'toi'}</h1><p>Ton espace créateur : ton profil, ta grille de tarifs et ton lien de parrainage.</p></div>
+      <div className="apphead"><h1>Salut {c.first_name || 'toi'}</h1><p>Ton espace créateur : ton profil, ton prix, tes options et ton lien de parrainage.</p></div>
       <div className={`status ${c.status}`}>
         <span className="ic" aria-hidden="true">{st.ic}</span>
         <div><b>{st.t}</b><p>{st.d}</p>{c.admin_note ? <p style={{ marginTop: 6 }}><b style={{ display: 'inline', fontSize: 'inherit' }}>Message de l’équipe :</b> {c.admin_note}</p> : null}</div>
@@ -111,23 +113,25 @@ export default function CreatorDashboard({ creator, packages, referrals }: { cre
       <div className="cols">
         <div style={{ display: 'grid', gap: 22, minWidth: 0 }}>
           <section className="panel" aria-labelledby="h-grid">
-            <div className="ph"><h2 id="h-grid">Ma grille de tarifs</h2><button type="button" className="btn sm ink" onClick={addPkg}>Ajouter un tarif</button></div>
-            <p className="small" style={{ color: 'var(--muted)' }}>Ce sont les prix que les marques verront. Une vidéo seule, un pack, ou la diffusion depuis ton compte.</p>
-            {pk.length === 0 ? <p className="empty" style={{ background: 'var(--ui-surface)' }}>Aucun tarif pour l’instant. Ajoute au moins une vidéo.</p> : null}
-            {pk.map((p) => (
-              <div className={`pk${p.active ? '' : ' off'}`} key={p.id}>
-                <div className="t">
-                  <input aria-label="Nom du tarif" value={p.title} maxLength={80} onChange={(e) => setP(p.id, 'title', e.target.value)} />
-                  <input aria-label="Détail" placeholder="Détail (ex. 1 vidéo, 2 révisions)" value={p.description || ''} maxLength={120} onChange={(e) => setP(p.id, 'description', e.target.value)} />
-                </div>
-                <label className="pr"><input aria-label="Prix en dirhams" type="number" inputMode="numeric" min={50} value={p.price_mad} onChange={(e) => setP(p.id, 'price_mad', e.target.value)} />DH</label>
-                <div className="act">
-                  {p._dirty ? <button type="button" className="iconbtn" style={{ background: 'var(--forest)', color: '#fff' }} onClick={() => savePkg(p)}>Enregistrer</button> : null}
-                  <button type="button" className="iconbtn" onClick={() => toggleActive(p)}>{p.active ? 'Masquer' : 'Afficher'}</button>
-                  <button type="button" className="iconbtn" onClick={() => archive(p)}>Retirer</button>
-                </div>
+            <div className="ph"><h2 id="h-grid">Mon prix</h2>{priceDirty ? <button type="button" className="btn sm ink" onClick={savePricing} disabled={busyP}>{busyP ? 'Enregistrement…' : 'Enregistrer'}</button> : <span className="tag good">Enregistré</span>}</div>
+            <p className="small" style={{ color: 'var(--muted)' }}>Un seul prix pour une vidéo UGC (jusqu’à 30 secondes, deux révisions incluses). Les options s’ajoutent à ce prix quand la marque les choisit.</p>
+            <label className="f"><span className="sr">Prix d’une vidéo</span>
+              <span className="rate-in"><input type="number" inputMode="numeric" min={50} max={100000} value={price} onChange={(e) => setPrice(e.target.value)} /><span>DH</span></span></label>
+            <div className="f"><span>Mes options</span>
+              <div className="optlist">
+                {OPTIONS.map((o) => {
+                  const v = opts[o.key];
+                  return (
+                    <div key={o.key} className={`optrow${v.on ? ' on' : ''}`}>
+                      <label className="optcheck"><input type="checkbox" checked={v.on} onChange={(e) => setOpt(o.key, { on: e.target.checked })} />
+                        <span><b>{o.fr[0]}</b><small>{o.fr[1]}</small></span></label>
+                      {v.on ? <label className="optprice"><span aria-hidden="true">+</span><input type="number" inputMode="numeric" min={50} aria-label={`${o.fr[0]} : prix`} value={v.price} onChange={(e) => setOpt(o.key, { price: e.target.value })} /><span>DH</span></label> : null}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            </div>
+            {pErr ? <p className="err" role="alert">{pErr}</p> : null}
           </section>
 
           <form className="panel" onSubmit={saveProfile} aria-labelledby="h-prof" noValidate>
@@ -166,8 +170,8 @@ export default function CreatorDashboard({ creator, packages, referrals }: { cre
             {link ? <div className="copy"><code>{link}</code><button type="button" className="btn sm ink" onClick={() => { navigator.clipboard?.writeText(link); setCopied(true); }}>{copied ? 'Copié' : 'Copier'}</button></div> : null}
           </section>
           <section className="panel" aria-labelledby="h-help">
-            <h2 id="h-help">Ton prix de départ</h2>
-            <p className="small" style={{ color: 'var(--muted)' }}>Tu as indiqué {dh(c.desired_rate)} pour une vidéo. Tu peux l’ajuster dans ta grille à tout moment.</p>
+            <h2 id="h-help">Ce que voit une marque</h2>
+            <p className="small" style={{ color: 'var(--muted)' }}>Vidéo à {dh(c.desired_rate)}{Object.values(opts).some((o) => o.on) ? `, options de ${dh(Math.min(...Object.values(opts).filter((o) => o.on).map((o) => Number(o.price) || 0)))} à ${dh(Math.max(...Object.values(opts).filter((o) => o.on).map((o) => Number(o.price) || 0)))}` : ', sans option'}. Tu peux changer ton prix quand tu veux.</p>
             {WHATSAPP ? <a className="btn quiet sm" style={{ justifySelf: 'start' }} href={`https://wa.me/${WHATSAPP}`} target="_blank" rel="noopener">Une question ? WhatsApp</a> : null}
           </section>
         </aside>

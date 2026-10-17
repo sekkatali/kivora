@@ -30,7 +30,7 @@ const TICK: [string, string][] = [
   ['Partnership Ads', 'depuis le compte du créateur'], ['Darija', 'parlé comme vos clients'],
 ];
 const FAQ: [string, string][] = [
-  ['Qui fixe le prix d’une vidéo ?', 'Le créateur. Il publie sa grille : vidéo seule, pack, diffusion depuis son compte. Vous voyez le total exact avant de payer.'],
+  ['Qui fixe le prix d’une vidéo ?', 'Le créateur. Il affiche un prix unique et ses options (rushes, accroches en plus, diffusion depuis son compte). Vous voyez le total exact avant de payer.'],
   ['Faut-il un abonnement ?', 'Non. Vous payez seulement quand vous réservez. Kivora Pro est une option pour mesurer les résultats publicitaires de vos vidéos.'],
   ['Quand le créateur est-il payé ?', 'Après votre validation de la vidéo. Jamais avant.'],
   ['Et si la vidéo ne convient pas ?', 'Deux révisions sont incluses. Si la vidéo ne respecte toujours pas le tarif réservé, vous êtes remboursé.'],
@@ -106,15 +106,15 @@ export default async function Vitrine() {
       <section className="band on-white forcreators" aria-labelledby="h-cr">
         <div className="rv">
           <h2 id="h-cr">Tu crées du contenu ? Fixe ton prix.</h2>
-          <p>Kivora ouvre aux marques marocaines. Préinscris-toi maintenant pour faire partie des premiers créateurs vérifiés : tu publies ta grille, les marques réservent, tu es payé à la validation.</p>
+          <p>Kivora ouvre aux marques marocaines. Préinscris-toi maintenant pour faire partie des premiers créateurs vérifiés : tu fixes ton prix, les marques réservent, tu es payé à la validation.</p>
           {count >= 50 ? <p className="small">{count.toLocaleString('fr-FR')} créateurs déjà préinscrits.</p> : null}
           <Link className="btn ink big" href="/inscription">Je me préinscris <Arr /></Link>
         </div>
-        <div className="ratecard rv" aria-label="Exemple de grille de tarifs">
-          <div className="h"><span className="ava" style={{ background: '#e0527a' }}>S</span><span><b>Ta grille</b><span>Exemple · tu fixes chaque prix</span></span></div>
-          <div className="r"><span>Vidéo UGC 30 s<small>1 vidéo, 2 révisions</small></span><b>650 DH</b></div>
-          <div className="r"><span>Pack 3 vidéos<small>3 accroches différentes</small></span><b>1 750 DH</b></div>
-          <div className="r"><span>Vidéo + diffusion depuis ton compte<small>Partnership Ads 30 jours</small></span><b>900 DH</b></div>
+        <div className="ratecard rv" aria-label="Exemple de prix et d’options">
+          <div className="h"><span className="ava" style={{ background: '#e0527a' }}>S</span><span><b>Ton prix</b><span>Exemple · un prix, des options</span></span></div>
+          <div className="r"><span>Vidéo UGC<small>ton prix unique</small></span><b>650 DH</b></div>
+          <div className="r"><span>Option : rushes bruts<small>s’ajoute au prix</small></span><b>+ 100 DH</b></div>
+          <div className="r"><span>Option : diffusion depuis ton compte<small>s’ajoute au prix</small></span><b>+ 250 DH</b></div>
         </div>
       </section>
 
