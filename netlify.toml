@@ -1,0 +1,5 @@
+# Déploiement Netlify : le site est dans le dossier app/
+[build]
+  base    = "app"
+  command = "npm run build"
+  publish = ".next"
