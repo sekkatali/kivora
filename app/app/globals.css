@@ -621,3 +621,9 @@ html:has(.appmode),body:has(.appmode){background:#f4f6f0}
   .top nav .langsw{min-height:32px;padding:0 12px;font-size:13px}
 }
 .formcard,.on-white,.appmode{color-scheme:light}
+.cc-opt{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;background:var(--ui-surface);border-radius:10px;padding:9px 12px;font-size:14px;cursor:pointer}
+.cc-opt input{accent-color:var(--forest);width:17px;height:17px;margin:0}
+.cc-opt b{font-weight:500;white-space:nowrap}
+.cc-opt:has(input:checked){background:#e6f5d3}
+.cat{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.cc .hd .ava{color:#fff;font-size:14px}

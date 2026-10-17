@@ -7,12 +7,12 @@ import { track } from '@/lib/track';
 type Brand = { id: string; company: string; contact_name: string | null; phone: string | null; website: string | null; ice: string | null; sector: string | null; monthly_budget: string | null; status: 'waitlist' | 'active' };
 type Card = { id: string; first_name: string; last_initial: string; city: string | null; languages: string[]; niches: string[]; instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; bio: string | null; min_price: number | null; packages: { key: string; title: string; price_mad: number }[] };
 
-export default function BrandDashboard({ brand }: { brand: Brand }) {
+export default function BrandDashboard({ brand, demo }: { brand: Brand; demo?: Card[] }) {
   const supabase = useMemo(() => createClient(), []);
   const [b, setB] = useState(brand);
   const [saved, setSaved] = useState(brand);
   const [msg, setMsg] = useState('');
-  const [list, setList] = useState<Card[] | null>(null);
+  const [list, setList] = useState<Card[] | null>(demo ?? null);
   const [city, setCity] = useState('');
   const [niche, setNiche] = useState('');
   const [max, setMax] = useState('');
@@ -21,11 +21,11 @@ export default function BrandDashboard({ brand }: { brand: Brand }) {
   const total = (c: Card) => (c.min_price || 0) + c.packages.filter((p) => (picked[c.id] || []).includes(p.key)).reduce((a, p) => a + p.price_mad, 0);
 
   useEffect(() => {
-    if (b.status !== 'active') return;
+    if (b.status !== 'active' || demo) return;
     supabase.rpc('get_catalog', { p_city: city || null, p_niche: niche || null }).then(({ data, error }) => {
       if (error) { setMsg(frError(error.message)); setList([]); } else setList((data as Card[]) || []);
     });
-  }, [supabase, b.status, city, niche]);
+  }, [supabase, b.status, city, niche, demo]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -48,7 +48,7 @@ export default function BrandDashboard({ brand }: { brand: Brand }) {
   return (
     <main className="appwrap">
       <div className="apphead"><h1>{b.company || 'Votre marque'}</h1>
-        <p>{b.status === 'active' ? 'Votre accès au catalogue est ouvert. Choisissez un créateur et un tarif : on organise la réservation avec vous.' : 'Vous êtes sur la liste d’accès anticipé. On vous recontacte pour la démo et l’ouverture de votre accès.'}</p></div>
+        <p>{b.status === 'active' ? 'Votre accès au catalogue est ouvert. Choisissez un créateur et ses options : on organise la réservation avec vous.' : 'Vous êtes sur la liste d’accès anticipé. On vous recontacte pour la démo et l’ouverture de votre accès.'}</p></div>
 
       {b.status !== 'active' ? (
         <div className="status pending"><span className="ic" aria-hidden="true">…</span><div><b>Accès anticipé demandé</b><p>Les premières marques sont invitées par vagues, dès que le catalogue est complet dans votre secteur.</p></div></div>
@@ -77,9 +77,10 @@ export default function BrandDashboard({ brand }: { brand: Brand }) {
                 <div className="pkl">
                   <div><span>Vidéo UGC<small>jusqu’à 30 s, 2 révisions</small></span><b>{dh(c.min_price)}</b></div>
                   {c.packages.map((p) => (
-                    <label key={p.key} className="optcheck" style={{ background: 'var(--ui-surface)', borderRadius: 10, padding: '9px 12px', justifyContent: 'space-between' }}>
-                      <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}><input type="checkbox" checked={(picked[c.id] || []).includes(p.key)} onChange={() => pick(c.id, p.key)} />{p.title}</span>
-                      <b style={{ fontWeight: 500 }}>+ {dh(p.price_mad)}</b>
+                    <label key={p.key} className="cc-opt">
+                      <input type="checkbox" checked={(picked[c.id] || []).includes(p.key)} onChange={() => pick(c.id, p.key)} />
+                      <span>{p.title}</span>
+                      <b>+ {dh(p.price_mad)}</b>
                     </label>
                   ))}
                 </div>
