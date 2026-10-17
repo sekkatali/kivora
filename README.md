@@ -5,6 +5,15 @@ Contenu du dossier :
 - `app/` : le site Next.js 15.
 - `supabase/schema.sql` : le schéma de la base. **Il est déjà appliqué** sur ton projet Supabase « KIVORA ».
 
+## Mode lancement (actif)
+
+Pendant la préinscription :
+- l'accueil `/` est la page de préinscription créateurs (`/inscription` affiche la même page) ;
+- la vitrine marques (`/vitrine`), la demande d'accès marques (`/marques`) et l'espace marque (`/marque`) sont réservés aux admins ; les autres visiteurs sont renvoyés vers l'accueil ;
+- les créateurs inscrits gardent leur espace `/createur` (profil, tarifs, parrainage), et `/connexion` reste ouvert.
+
+Pour ouvrir le site aux marques : ajoute `NEXT_PUBLIC_LAUNCH_MODE=off` dans Vercel, puis redéploie.
+
 ## Ce qu'il y a dedans
 
 | Page | Pour qui | Rôle |
@@ -88,7 +97,7 @@ L'envoi d'e-mails par défaut de Supabase n'écrit qu'aux membres de ton équipe
 - **URL de l'annonce** : `https://ton-domaine.ma/inscription?utm_source=meta&utm_medium=paid&utm_campaign=p1_createurs&utm_content={{ad.name}}`
 - **Événement d'optimisation** : `CompleteRegistration`, envoyé par le pixel et par l'API Conversions avec le même `eventID`, donc sans doublon.
 - Les UTM sont gardés 30 jours dans le navigateur et enregistrés avec la fiche. Dans `/admin`, saisis ta dépense cumulée : le coût par préinscrit Meta se calcule tout seul (objectif < 20 DH).
-- **Parrainage** : chaque créateur a un lien `…/inscription?ref=CODE`. Le nombre de filleuls s'affiche dans son espace et dans l'export CSV.
+- **Parrainage** : chaque créateur a un lien `…/?ref=CODE`. Le nombre de filleuls s'affiche dans son espace et dans l'export CSV.
 
 ## Développer en local
 

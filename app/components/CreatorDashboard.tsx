@@ -97,7 +97,7 @@ export default function CreatorDashboard({ creator, packages, referrals }: { cre
     setPk((l) => [...l, data as Pkg]);
   }
 
-  const link = origin && c.referral_code ? `${origin}/inscription?ref=${c.referral_code}` : '';
+  const link = origin && c.referral_code ? `${origin}/?ref=${c.referral_code}` : '';
   const st = STATUS[c.status];
 
   return (

@@ -1,6 +1,15 @@
 import Link from 'next/link';
+import { LAUNCH } from '@/lib/launch';
 
 export default function Footer() {
+  if (LAUNCH) {
+    return (
+      <footer className="band on-black foot">
+        <div className="wm" aria-hidden="true">KIVORA</div>
+        <div className="legal"><span>© {new Date().getFullYear()} Kivora · Maroc</span><span style={{ display: 'flex', gap: 20 }}><Link href="/">Préinscription</Link><Link href="/connexion">Se connecter</Link><Link href="/confidentialite">Données personnelles</Link></span></div>
+      </footer>
+    );
+  }
   return (
     <footer className="band on-black foot">
       <div className="wm" aria-hidden="true">KIVORA</div>

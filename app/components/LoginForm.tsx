@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { frError } from '@/lib/data';
+import { LAUNCH } from '@/lib/launch';
 import { Arr } from './Icons';
 
 export default function LoginForm() {
@@ -51,9 +52,9 @@ export default function LoginForm() {
       <button type="button" className="link" style={{ justifySelf: 'center', fontSize: 14 }} onClick={() => { setMode(mode === 'login' ? 'reset' : 'login'); setErr(''); setOk(''); }}>
         {mode === 'login' ? 'Mot de passe oublié ?' : 'Retour à la connexion'}
       </button>
-      <div className="chooser">
-        <Link href="/inscription"><b>Créateur ?</b><span>Préinscris-toi gratuitement</span></Link>
-        <Link href="/marques"><b>Marque ?</b><span>Demandez votre accès</span></Link>
+      <div className="chooser" style={LAUNCH ? { gridTemplateColumns: '1fr' } : undefined}>
+        <Link href="/"><b>Pas encore inscrit ?</b><span>Préinscris-toi gratuitement</span></Link>
+        {LAUNCH ? null : <Link href="/marques"><b>Marque ?</b><span>Demandez votre accès</span></Link>}
       </div>
     </form>
   );
