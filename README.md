@@ -31,6 +31,14 @@ Chaque réservation a sa conversation. L'admin supervise tout dans l'onglet Rés
 
 Les scripts `supabase/migrations/09_booking_requests.sql` et `11_content_review.sql` sont déjà appliqués sur le projet KIVORA. Sur une nouvelle base, colle-les dans cet ordre dans Supabase › SQL Editor › Run.
 
+## Vidéos et photo des créateurs
+
+Chaque créateur met en ligne sa photo et jusqu'à 6 vidéos (50 Mo max chacune) depuis son espace, onglet Profil. Une miniature est générée à l'envoi. Les marques actives voient un catalogue en cartes vidéo et, pour chaque créateur, une page profil avec ses vidéos (lecture plein écran avec le son) et le bloc de réservation. L'admin voit les vidéos au moment de vérifier un créateur.
+
+Les fichiers sont dans un stockage Supabase **privé** (`portfolio`) : seuls le créateur, les admins et les marques actives (pour les créateurs vérifiés) peuvent les lire, via des liens valables une heure. Script : `supabase/migrations/12_creator_videos.sql` (déjà appliqué).
+
+Coût : l'offre gratuite de Supabase inclut 1 Go de stockage, soit environ 50 à 100 vidéos. Au-delà, ou dès que le trafic des marques augmente, passer Supabase en Pro (25 $/mois, 100 Go).
+
 ## Ce qu'il y a dedans
 
 | Page | Pour qui | Rôle |

@@ -1,14 +1,16 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { CITIES, NICHES, SECTORS, BUDGETS, LANGUAGES, dh, initials, toneFor, frError, WHATSAPP } from '@/lib/data';
+import { CITIES, NICHES, SECTORS, BUDGETS, LANGUAGES, dh, frError, WHATSAPP } from '@/lib/data';
+import { posterOf, signUrls, withPosters } from '@/lib/media';
+import { Avatar, VideoTile, VideoViewer } from './Media';
 import { track } from '@/lib/track';
 import { DashNav, useHashTab, type NavItem } from './DashNav';
 import BookingCard from './BookingCard';
 import { OPEN_STATUSES, isMissingTable, needsAction, type BookingRequest } from '@/lib/booking';
 
 type Brand = { id: string; company: string; contact_name: string | null; phone: string | null; website: string | null; ice: string | null; sector: string | null; monthly_budget: string | null; status: 'waitlist' | 'active'; created_at?: string };
-type Card = { id: string; first_name: string; last_initial: string; city: string | null; languages: string[]; niches: string[]; instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; bio: string | null; min_price: number | null; packages: { key: string; title: string; price_mad: number }[] };
+type Card = { id: string; first_name: string; last_initial: string; city: string | null; languages: string[]; niches: string[]; instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; bio: string | null; min_price: number | null; packages: { key: string; title: string; price_mad: number }[]; avatar_path?: string | null; videos?: string[] };
 type Tab = 'catalogue' | 'demandes' | 'marque' | 'compte';
 const TABS = ['catalogue', 'demandes', 'marque', 'compte'] as const;
 const fmtK = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace('.', ',')} k` : String(n));
@@ -16,7 +18,7 @@ const OBJECTIFS = ['Publicité Meta ou TikTok', 'Réseaux sociaux de la marque',
 
 export default function BrandDashboard({ brand, email, requests = [], requestsReady = true, demo }: { brand: Brand; email?: string | null; requests?: BookingRequest[]; requestsReady?: boolean; demo?: Card[] }) {
   const supabase = useMemo(() => createClient(), []);
-  const [tab, setTab] = useHashTab<Tab>(TABS, 'catalogue');
+  const [tab, setTabRaw] = useHashTab<Tab>(TABS, 'catalogue');
   const [b, setB] = useState(brand);
   const [saved, setSaved] = useState(brand);
   const [msg, setMsg] = useState('');
@@ -30,20 +32,30 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState<BookingRequest | 'whatsapp' | null>(null);
   const [pw, setPw] = useState('');
+  const setTab = (t: Tab) => { setOpen(null); setView(null); setTabRaw(t); };
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [view, setView] = useState<number | null>(null);
   const active = b.status === 'active';
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2600); };
 
   useEffect(() => {
     if (!active || demo) return;
-    supabase.rpc('get_catalog', { p_city: f.city || null, p_niche: f.niche || null }).then(({ data, error }) => {
-      if (error) { say(frError(error.message)); setList([]); } else setList((data as Card[]) || []);
+    supabase.rpc('get_creators_catalog', { p_city: f.city || null, p_niche: f.niche || null }).then(async ({ data, error }) => {
+      if (error) { say(frError(error.message)); setList([]); return; }
+      const rows = (data as Card[]) || [];
+      setList(rows);
+      const m = await signUrls(supabase, rows.flatMap((c) => [c.avatar_path, ...withPosters(c.videos || [])]));
+      setUrls((u) => ({ ...u, ...m }));
     });
   }, [supabase, active, f.city, f.niche, demo]);
+  // Le bouton « retour » du téléphone ou du navigateur referme le profil.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const onPop = () => { setOpen(null); setView(null); };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   }, []);
+  /** Lien d'un fichier : signé (vrai compte) ou direct (démo). */
+  const src = (p?: string | null) => (!p ? null : /^(https?:|\/)/.test(p) ? p : urls[p] || null);
 
   const shown = (list || []).filter((c) =>
     (!f.max || (c.min_price ?? 0) <= Number(f.max)) && (!f.lang || c.languages.includes(f.lang))
@@ -51,7 +63,14 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
   const inProgress = reqs.filter((r) => OPEN_STATUSES.includes(r.status));
   const toDo = reqs.filter((r) => needsAction(r, 'brand')).length;
 
-  function openCreator(c: Card) { setOpen(c); setPicked([]); setSent(null); setBrief((x) => ({ ...x, consignes: '' })); }
+  function openCreator(c: Card) {
+    setOpen(c); setPicked([]); setSent(null); setView(null); setBrief((x) => ({ ...x, consignes: '' }));
+    try { window.history.pushState({ kivoraProfile: c.id }, '', '#catalogue'); } catch { /* rien */ }
+    window.scrollTo({ top: 0 });
+  }
+  function closeCreator() {
+    if (window.history.state?.kivoraProfile) window.history.back(); else setOpen(null);
+  }
   const total = open ? (open.min_price || 0) + open.packages.filter((p) => picked.includes(p.key)).reduce((a, p) => a + p.price_mad, 0) : 0;
 
   async function sendRequest() {
@@ -107,8 +126,83 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
               <button className="btn quiet" onClick={() => setTab('marque')}>Compléter les informations de ma marque</button>
               {WHATSAPP ? <a className="btn ink" href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(`Bonjour Kivora, c’est ${b.contact_name || ''} de ${b.company}. Je voudrais une démo.`)}`} target="_blank" rel="noopener">Demander une démo</a> : null}
             </div></div>
-        ) : (<>
-          <div className="apphead"><h1>Les créateurs</h1><p>{list ? `${list.length} créateur${list.length > 1 ? 's' : ''} vérifié${list.length > 1 ? 's' : ''} un par un. ` : ''}Le prix affiché est celui du créateur ; les options s’y ajoutent. Choisissez, décrivez votre produit, le créateur accepte et vous livre.</p></div>
+        ) : open ? (() => {
+          const vp = (open.videos || []).filter((p) => src(p));
+          const vids = vp.map((p) => src(p) as string);
+          const name = `${open.first_name} ${open.last_initial}.`;
+          return (
+            <div className="pf">
+              <button className="link small pf-back" onClick={closeCreator}>← Tous les créateurs</button>
+              <div className="pf-grid">
+                <div className="pf-main">
+                  <header className="pf-head">
+                    <Avatar src={src(open.avatar_path)} id={open.id} first={open.first_name} last={open.last_initial} size={84} />
+                    <div>
+                      <h1>{name}</h1>
+                      <p>{[open.city, open.languages.join(', ')].filter(Boolean).join(' · ')}</p>
+                      <div className="pf-tags">
+                        <span className="tag good">✓ Vérifié par Kivora</span>
+                        {open.followers ? <span className="tag">{fmtK(open.followers)} abonnés</span> : null}
+                        {open.niches.map((n) => <span className="tag" key={n}>{n}</span>)}
+                      </div>
+                    </div>
+                  </header>
+                  {open.bio ? <p className="pf-bio">{open.bio}</p> : null}
+                  <section aria-labelledby="h-vids" className="pf-sec">
+                    <div className="ph"><h2 id="h-vids">Ses vidéos</h2>{vids.length ? <span className="small muted">{vids.length} vidéo{vids.length > 1 ? 's' : ''} · touchez pour lancer avec le son</span> : null}</div>
+                    {vids.length ? (
+                      <div className="pf-reel">{vp.map((p, k) => <VideoTile key={p} src={vids[k]} poster={src(posterOf(p))} label={`Vidéo ${k + 1} de ${name}`} onOpen={() => setView(k)} />)}</div>
+                    ) : <p className="empty">{open.first_name} n’a pas encore ajouté de vidéos sur Kivora.{open.portfolio_url ? ' Ses vidéos sont visibles sur le lien ci-dessous.' : ''}</p>}
+                    <div className="links">
+                      {open.portfolio_url ? <a className="link" href={open.portfolio_url} target="_blank" rel="noopener nofollow">Plus de vidéos</a> : null}
+                      {open.instagram ? <a className="link" href={`https://instagram.com/${open.instagram}`} target="_blank" rel="noopener nofollow">Instagram @{open.instagram}</a> : null}
+                      {open.tiktok ? <a className="link" href={`https://tiktok.com/@${open.tiktok}`} target="_blank" rel="noopener nofollow">TikTok @{open.tiktok}</a> : null}
+                    </div>
+                  </section>
+                  <section className="pf-sec pf-incl" aria-label="Ce qui est inclus">
+                    <div><b>Vidéo UGC verticale</b><span>jusqu’à 30 secondes, prête pour vos publicités</span></div>
+                    <div><b>2 révisions</b><span>si un ajustement est nécessaire</span></div>
+                    <div><b>Droits publicitaires</b><span>la vidéo est à vous après validation</span></div>
+                  </section>
+                </div>
+
+                <aside className="pf-book" id="reserver" aria-label={`Réserver ${name}`}>
+                  {sent === 'whatsapp' ? (<>
+                    <h2>Envoyer la demande</h2>
+                    <p className="small">Le suivi en ligne n’est pas encore activé : envoyez votre demande à l’équipe sur WhatsApp, elle la transmet au créateur.</p>
+                    {WHATSAPP ? <a className="btn ink big" href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(waText)}`} target="_blank" rel="noopener">Envoyer sur WhatsApp</a> : <p className="err">Numéro WhatsApp de l’équipe non configuré.</p>}
+                  </>) : sent ? (<>
+                    <h2>Demande envoyée</h2>
+                    <p className="okbox">Votre demande à {dh(sent.total_mad)} est envoyée à {open.first_name}. Il l’accepte ou la refuse, en général sous 48 heures ; vous êtes prévenu dans l’onglet Réservations.</p>
+                    <button className="btn ink" onClick={() => { setOpen(null); setTab('demandes'); }}>Suivre ma réservation</button>
+                  </>) : (<>
+                    <div className="pf-price"><span>Vidéo</span><b>{dh(open.min_price)}</b></div>
+                    {open.packages.length ? <div className="pkl">
+                      <span className="small muted">Options</span>
+                      {open.packages.map((p) => (
+                        <label key={p.key} className="cc-opt"><input type="checkbox" checked={picked.includes(p.key)} onChange={() => setPicked((x) => (x.includes(p.key) ? x.filter((k) => k !== p.key) : [...x, p.key]))} /><span>{p.title}</span><b>+ {dh(p.price_mad)}</b></label>
+                      ))}
+                    </div> : null}
+                    <label className="f"><span>Produit à mettre en avant</span><input value={brief.produit} onChange={(e) => setBrief({ ...brief, produit: e.target.value })} placeholder="Ex. Sérum à l’argan 30 ml" /></label>
+                    <label className="f"><span>Où sera diffusée la vidéo ?</span><select value={brief.objectif} onChange={(e) => setBrief({ ...brief, objectif: e.target.value })}>{OBJECTIFS.map((o) => <option key={o}>{o}</option>)}</select></label>
+                    <label className="f"><span>Date souhaitée <em>(facultatif)</em></span><input type="date" value={brief.date} onChange={(e) => setBrief({ ...brief, date: e.target.value })} /></label>
+                    <label className="f"><span>Consignes <em>(facultatif)</em></span><textarea value={brief.consignes} onChange={(e) => setBrief({ ...brief, consignes: e.target.value })} placeholder="Ton, accroche, mots à éviter, points clés du produit…" /></label>
+                    <div className="sumbox">
+                      <div><span>Vidéo</span><span>{dh(open.min_price)}</span></div>
+                      {open.packages.filter((p) => picked.includes(p.key)).map((p) => <div key={p.key}><span>{p.title}</span><span>+ {dh(p.price_mad)}</span></div>)}
+                      <span className="t">{dh(total)}</span>
+                      <small>Prix du créateur. Les frais de service et la TVA s’ajoutent au paiement.</small>
+                    </div>
+                    <button className="btn ink big" onClick={sendRequest} disabled={sending}>{sending ? 'Envoi…' : 'Envoyer la demande'}</button>
+                  </>)}
+                </aside>
+              </div>
+              {!sent ? <a className="pf-sticky" href="#reserver"><span>{name}</span><b>Réserver · {dh(total)}</b></a> : null}
+              {view !== null && vids.length ? <VideoViewer srcs={vids} start={view} title={name} onClose={() => setView(null)} /> : null}
+            </div>
+          );
+        })() : (<>
+          <div className="apphead"><h1>Les créateurs</h1><p>{list ? `${list.length} créateur${list.length > 1 ? 's' : ''} vérifié${list.length > 1 ? 's' : ''} un par un. ` : ''}Ouvrez un profil pour voir ses vidéos, puis réservez en direct au prix du créateur.</p></div>
           {toDo > 0 || inProgress.length > 0 ? (
             <div className="todo">
               {toDo > 0 ? <button onClick={() => setTab('demandes')}><i aria-hidden="true" /><span><b>{toDo}</b> vidéo{toDo > 1 ? 's' : ''} livrée{toDo > 1 ? 's' : ''} à valider</span><em>Voir →</em></button>
@@ -124,24 +218,27 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
             <span className="small muted">{list ? `${shown.length} créateur${shown.length > 1 ? 's' : ''}` : 'Chargement…'}</span>
           </div>
           {list && shown.length === 0 ? <p className="empty">Aucun créateur ne correspond à ces filtres pour l’instant.</p> : null}
-          <div className="cat">
-            {shown.map((c) => (
-              <article className="cc" key={c.id}>
-                <div className="hd"><span className="ava" style={{ background: toneFor(c.id) }}>{initials(c.first_name, c.last_initial)}</span>
-                  <span><b>{c.first_name} {c.last_initial}.</b><span>{[c.city, c.followers ? `${fmtK(c.followers)} abonnés` : null].filter(Boolean).join(' · ')}</span></span>
-                  {c.min_price ? <span className="from">{dh(c.min_price)}</span> : null}</div>
-                <div className="chips" style={{ margin: 0 }}>{c.niches.map((n) => <span className="chip" key={n} style={{ background: 'var(--ui-surface)' }}>{n}</span>)}</div>
-                {c.languages.length ? <p className="opts-s">Langues : {c.languages.join(', ')}</p> : null}
-                {c.bio ? <p className="bio">{c.bio}</p> : null}
-                <div className="links">
-                  {c.portfolio_url ? <a className="link" href={c.portfolio_url} target="_blank" rel="noopener nofollow">Voir ses vidéos</a> : null}
-                  {c.instagram ? <a className="link" href={`https://instagram.com/${c.instagram}`} target="_blank" rel="noopener nofollow">Instagram</a> : null}
-                  {c.tiktok ? <a className="link" href={`https://tiktok.com/@${c.tiktok}`} target="_blank" rel="noopener nofollow">TikTok</a> : null}
-                </div>
-                {c.packages.length ? <p className="opts-s">Options : {c.packages.map((p) => p.title).join(' · ')}</p> : null}
-                <button className="btn ink" onClick={() => openCreator(c)}>Réserver{c.min_price ? ` · ${dh(c.min_price)}` : ''}</button>
-              </article>
-            ))}
+          <div className="cvs">
+            {shown.map((c) => {
+              const cover = src(c.videos?.[0]);
+              const coverPoster = c.videos?.[0] ? src(posterOf(c.videos[0])) : null;
+              const n = c.videos?.length || 0;
+              return (
+                <article className="cv" key={c.id}>
+                  <div className="cv-media">
+                    {cover ? <VideoTile src={cover} poster={coverPoster} label={`Voir le profil de ${c.first_name}`} onOpen={() => openCreator(c)} />
+                      : <button type="button" className="cv-ph" onClick={() => openCreator(c)} aria-label={`Voir le profil de ${c.first_name}`}><Avatar src={src(c.avatar_path)} id={c.id} first={c.first_name} last={c.last_initial} size={76} /></button>}
+                    {c.min_price ? <span className="cv-price">{dh(c.min_price)}</span> : null}
+                    {n > 1 ? <span className="cv-n">{n} vidéos</span> : null}
+                  </div>
+                  <button type="button" className="cv-body" onClick={() => openCreator(c)}>
+                    <span className="cv-id"><Avatar src={src(c.avatar_path)} id={c.id} first={c.first_name} last={c.last_initial} size={36} />
+                      <span><b>{c.first_name} {c.last_initial}.</b><span>{[c.city, c.followers ? `${fmtK(c.followers)} abonnés` : null].filter(Boolean).join(' · ')}</span></span></span>
+                    <span className="cv-chips">{c.niches.slice(0, 3).map((x) => <span key={x}>{x}</span>)}</span>
+                  </button>
+                </article>
+              );
+            })}
           </div>
         </>))}
 
@@ -202,41 +299,6 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
         </>)}
       </main>
 
-      {open ? (<>
-        <div className="drawer-bg" onClick={() => setOpen(null)} />
-        <aside className="drawer" role="dialog" aria-modal="true" aria-label={`Demande avec ${open.first_name}`}>
-          <div className="drawer-h"><h2>{sent ? 'Demande envoyée' : 'Demander une vidéo'}</h2><button className="x" onClick={() => setOpen(null)} aria-label="Fermer">×</button></div>
-          <div className="cc" style={{ padding: 14 }}>
-            <div className="hd"><span className="ava" style={{ background: toneFor(open.id) }}>{initials(open.first_name, open.last_initial)}</span>
-              <span><b>{open.first_name} {open.last_initial}.</b><span>{open.city} · {open.niches.join(', ')}</span></span></div>
-          </div>
-          {sent === 'whatsapp' ? (<>
-            <p>Le suivi en ligne n’est pas encore activé : envoyez votre demande à l’équipe sur WhatsApp, elle la transmet au créateur.</p>
-            {WHATSAPP ? <a className="btn ink big" href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(waText)}`} target="_blank" rel="noopener">Envoyer sur WhatsApp</a> : <p className="err">Numéro WhatsApp de l’équipe non configuré.</p>}
-          </>) : sent ? (<>
-            <p className="okbox">Votre demande à {dh(sent.total_mad)} est envoyée à {open.first_name}. Il l’accepte ou la refuse, en général sous 48 heures ; vous êtes prévenu dans l’onglet Réservations.</p>
-            <button className="btn ink" onClick={() => { setOpen(null); setTab('demandes'); }}>Suivre ma réservation</button>
-          </>) : (<>
-            <div className="pkl">
-              <div><span>Vidéo UGC<small>jusqu’à 30 s, 2 révisions</small></span><b>{dh(open.min_price)}</b></div>
-              {open.packages.map((p) => (
-                <label key={p.key} className="cc-opt"><input type="checkbox" checked={picked.includes(p.key)} onChange={() => setPicked((x) => (x.includes(p.key) ? x.filter((k) => k !== p.key) : [...x, p.key]))} /><span>{p.title}</span><b>+ {dh(p.price_mad)}</b></label>
-              ))}
-            </div>
-            <label className="f"><span>Produit à mettre en avant</span><input value={brief.produit} onChange={(e) => setBrief({ ...brief, produit: e.target.value })} placeholder="Ex. Sérum à l’argan 30 ml" /></label>
-            <label className="f"><span>Où sera diffusée la vidéo ?</span><select value={brief.objectif} onChange={(e) => setBrief({ ...brief, objectif: e.target.value })}>{OBJECTIFS.map((o) => <option key={o}>{o}</option>)}</select></label>
-            <label className="f"><span>Date souhaitée <em>(facultatif)</em></span><input type="date" value={brief.date} onChange={(e) => setBrief({ ...brief, date: e.target.value })} /></label>
-            <label className="f"><span>Consignes <em>(facultatif)</em></span><textarea value={brief.consignes} onChange={(e) => setBrief({ ...brief, consignes: e.target.value })} placeholder="Ton, accroche, mots à éviter, points clés du produit…" /></label>
-            <div className="sumbox">
-              <div><span>Vidéo</span><span>{dh(open.min_price)}</span></div>
-              {open.packages.filter((p) => picked.includes(p.key)).map((p) => <div key={p.key}><span>{p.title}</span><span>+ {dh(p.price_mad)}</span></div>)}
-              <span className="t">{dh(total)}</span>
-              <small>Prix du créateur. Les frais de service et la TVA s’ajoutent au paiement.</small>
-            </div>
-            <button className="btn ink big" onClick={sendRequest} disabled={sending}>{sending ? 'Envoi…' : 'Envoyer la demande'}</button>
-          </>)}
-        </aside>
-      </>) : null}
       {toast ? <div className="toast" role="status">{toast}</div> : null}
     </div>
   );

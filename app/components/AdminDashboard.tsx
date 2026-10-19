@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase/client';
 import { dh, frError } from '@/lib/data';
 import { DashNav, useHashTab, type NavItem } from './DashNav';
 import BookingCard from './BookingCard';
+import { Avatar, VideoTile, VideoViewer } from './Media';
+import { posterOf, signUrls, withPosters } from '@/lib/media';
 import { ALL_STATUSES, OPEN_STATUSES, PAID_STATUSES, STATUS_LABEL, type BookingRequest, type BookingReview } from '@/lib/booking';
 
 const AE_SHORT: Record<string, string> = { oui: 'Oui', en_cours: 'En cours', non: 'Non' };
@@ -15,6 +17,7 @@ type Creator = {
   instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; desired_rate: number | null;
   ae_status: string | null; bio: string | null; status: 'pending' | 'approved' | 'rejected'; admin_note: string | null; referral_code: string | null;
   referred_by: string | null; utm: Record<string, string>; created_at: string; reviewed_at: string | null; profiles: { email: string | null };
+  avatar_path?: string | null; videos?: string[];
 };
 type Brand = {
   id: string; company: string; contact_name: string | null; phone: string | null; website: string | null; ice: string | null; sector: string | null;
@@ -73,6 +76,8 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
   const [spendB, setSpendB] = useState('');
   const [reviewOn, setReviewOn] = useState(reviewOn0);
   const [swBusy, setSwBusy] = useState(false);
+  const [media, setMedia] = useState<Record<string, string>>({});
+  const [viewer, setViewer] = useState<{ srcs: string[]; i: number; title: string } | null>(null);
   const reviewBy = useMemo(() => Object.fromEntries(reviews.map((v) => [v.booking_id, v])), [reviews]);
 
   useEffect(() => { try { setSpend(localStorage.getItem('kivora-spend') || ''); setSpendB(localStorage.getItem('kivora-spend-brands') || ''); } catch { /* rien */ } }, []);
@@ -277,10 +282,14 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
               <thead><tr><th>Créateur</th><th>Ville</th><th>Niches</th><th>Réseaux</th><th>Prix</th><th>Auto-entr.</th><th>Statut</th><th>Inscrit</th><th /></tr></thead>
               <tbody>{cRows.map((c) => {
                 const isOpen = open === c.id;
-                const toggle = () => { setOpen(isOpen ? null : c.id); setNote(c.admin_note || ''); };
+                const toggle = () => {
+                  setOpen(isOpen ? null : c.id); setNote(c.admin_note || '');
+                  if (!isOpen) signUrls(supabase, [c.avatar_path, ...withPosters(c.videos || [])]).then((m) => setMedia((x) => ({ ...x, ...m })));
+                };
+                const vids = (c.videos || []).filter((v) => media[v]);
                 return [
                   <tr key={c.id} className={isOpen ? 'open' : ''}>
-                    <td><button className="rowbtn" onClick={toggle} aria-expanded={isOpen}>{c.first_name} {c.last_name}</button><span className="sub">{c.profiles?.email}</span></td>
+                    <td><button className="rowbtn" onClick={toggle} aria-expanded={isOpen}>{c.first_name} {c.last_name}</button><span className="sub">{c.profiles?.email}</span><span className="sub">{c.videos?.length ? `${c.videos.length} vidéo${c.videos.length > 1 ? 's' : ''}${c.avatar_path ? ' · photo' : ''}` : 'Aucune vidéo'}</span></td>
                     <td>{c.city}</td>
                     <td>{c.niches.join(', ')}</td>
                     <td>{c.instagram ? <a className="link" href={`https://instagram.com/${c.instagram}`} target="_blank" rel="noopener nofollow">IG</a> : null} {c.tiktok ? <a className="link" href={`https://tiktok.com/@${c.tiktok}`} target="_blank" rel="noopener nofollow">TT</a> : null}<span className="sub">{c.followers ? `${c.followers.toLocaleString('fr-FR')} abonnés` : ''}</span></td>
@@ -295,7 +304,15 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
                       <dl className="detail">
                         <div><dt>WhatsApp</dt><dd>{c.phone ? <a className="link" href={wa(c.phone)} target="_blank" rel="noopener">{c.phone}</a> : '—'}</dd></div>
                         <div><dt>Langues</dt><dd>{c.languages.join(', ') || '—'}</dd></div>
-                        <div><dt>Vidéos</dt><dd>{c.portfolio_url ? <a className="link" href={c.portfolio_url} target="_blank" rel="noopener nofollow">Ouvrir le lien</a> : 'Pas de lien'}</dd></div>
+                        <div className="wide"><dt>Photo et vidéos</dt><dd>
+                          {c.avatar_path || c.videos?.length ? (
+                            <div className="adm-media">
+                              {c.avatar_path ? <Avatar src={media[c.avatar_path]} id={c.id} first={c.first_name} last={c.last_name} size={72} /> : null}
+                              {vids.map((v, k) => <VideoTile key={v} src={media[v]} poster={media[posterOf(v)]} label={`Vidéo ${k + 1} de ${c.first_name}`} onOpen={() => setViewer({ srcs: vids.map((x) => media[x]), i: k, title: `${c.first_name} ${c.last_name}` })} />)}
+                            </div>
+                          ) : 'Aucune vidéo ajoutée sur Kivora'}
+                          {c.portfolio_url ? <> · <a className="link" href={c.portfolio_url} target="_blank" rel="noopener nofollow">Lien externe</a></> : null}
+                        </dd></div>
                         <div><dt>Options</dt><dd>{(pkBy[c.id] || []).filter((p) => p.option_key && p.active).map((p) => `${p.title} +${dh(p.price_mad)}`).join(' · ') || 'Aucune'}</dd></div>
                         <div><dt>Parrainé par</dt><dd>{c.referred_by || '—'} · code {c.referral_code}</dd></div>
                         <div><dt>Campagne</dt><dd>{[c.utm?.utm_campaign, c.utm?.utm_content].filter(Boolean).join(' / ') || '—'}</dd></div>
@@ -385,6 +402,7 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
           </>)}
         </>)}
       </main>
+      {viewer ? <VideoViewer srcs={viewer.srcs} start={viewer.i} title={viewer.title} onClose={() => setViewer(null)} /> : null}
       {toast ? <div className="toast" role="status">{toast}</div> : null}
     </div>
   );

@@ -5,13 +5,14 @@ import { CITIES, NICHES, LANGUAGES, frError, dh, initials, WHATSAPP } from '@/li
 import { cleanHandle, cleanPhone, phoneOk } from './CreatorSignup';
 import { OPTIONS } from '@/lib/i18n';
 import BookingCard from './BookingCard';
+import PortfolioEditor from './PortfolioEditor';
 import { STATUS_LABEL, needsAction, type BookingRequest, type BookingReview } from '@/lib/booking';
 
 type Creator = {
   id: string; first_name: string; last_name: string; phone: string | null; city: string | null; languages: string[]; niches: string[];
   instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; desired_rate: number | null;
   ae_status: string | null; bio: string | null; status: 'pending' | 'approved' | 'rejected'; admin_note: string | null; referral_code: string | null;
-  created_at?: string; reviewed_at?: string | null;
+  created_at?: string; reviewed_at?: string | null; avatar_path?: string | null; videos?: string[];
 };
 type Pkg = { id: string; title: string; description: string | null; price_mad: number; active: boolean; archived?: boolean; position: number; option_key: string | null };
 type O = { on: boolean; price: string };
@@ -173,7 +174,7 @@ export default function CreatorDashboard({ creator, packages, referrals, email, 
   const onOpts = OPTIONS.filter((o) => opts[o.key].on);
   const checks: { label: string; ok: boolean; tab: Tab }[] = [
     { label: 'Ton prix et au moins une option', ok: !!c.desired_rate && onOpts.length > 0, tab: 'offre' },
-    { label: 'Un lien vers 2 ou 3 de tes vidéos', ok: !!c.portfolio_url, tab: 'profil' },
+    { label: 'Au moins 3 vidéos sur ton profil', ok: (c.videos?.length || 0) >= 3, tab: 'profil' },
     { label: 'Tes réseaux renseignés', ok: !!(c.instagram || c.tiktok), tab: 'profil' },
     { label: 'Une présentation de 2 lignes', ok: (c.bio || '').trim().length >= 40, tab: 'profil' },
     { label: 'Ton statut auto-entrepreneur', ok: c.ae_status === 'oui' || c.ae_status === 'en_cours', tab: 'paiement' },
@@ -298,12 +299,14 @@ export default function CreatorDashboard({ creator, packages, referrals, email, 
             {timeline}
             <h2 style={{ marginTop: 8 }}>Ce qu’on vérifie</h2>
             <ul className="checklist">
-              <li className={c.portfolio_url ? 'ok' : ''}><i aria-hidden="true" />Des vidéos face caméra : image nette, son propre</li>
+              <li className={(c.videos?.length || 0) > 0 || c.portfolio_url ? 'ok' : ''}><i aria-hidden="true" />Des vidéos face caméra : image nette, son propre</li>
               <li className={c.instagram || c.tiktok ? 'ok' : ''}><i aria-hidden="true" />Des réseaux actifs, même avec peu d’abonnés</li>
               <li className={(c.bio || '').trim().length >= 40 ? 'ok' : ''}><i aria-hidden="true" />Une présentation claire de ce que tu filmes</li>
               <li className={c.phone ? 'ok' : ''}><i aria-hidden="true" />Un numéro WhatsApp pour te joindre</li>
             </ul>
           </section>
+          <PortfolioEditor supabase={supabase} uid={c.id} first={c.first_name} last={c.last_name} videos={c.videos || []} avatar={c.avatar_path || null} say={say}
+            onChange={(p) => { setC((x) => ({ ...x, ...p })); setSaved((x) => ({ ...x, ...p })); }} />
           <form className="panel" onSubmit={saveProfile} noValidate aria-labelledby="h-prof">
             <div className="ph"><h2 id="h-prof">Mes informations</h2>{profileDirty ? <span className="tag warn">Non enregistré</span> : null}</div>
             <div className="fields two">
@@ -315,7 +318,7 @@ export default function CreatorDashboard({ creator, packages, referrals, email, 
             <div className="f"><span>Niches <em>(3 maximum)</em></span><div className="pills">{NICHES.map((n) => <button type="button" key={n} className="pill" aria-pressed={c.niches.includes(n)} onClick={() => toggle('niches', n, 3)}>{n}</button>)}</div></div>
             <div className="f"><span>Langues</span><div className="pills">{LANGUAGES.map((n) => <button type="button" key={n} className="pill" aria-pressed={c.languages.includes(n)} onClick={() => toggle('languages', n)}>{n}</button>)}</div></div>
             <h2 style={{ marginTop: 8 }}>Mes vidéos et réseaux</h2>
-            <label className="f"><span>Lien vers tes vidéos</span><input type="url" placeholder="https://" value={c.portfolio_url || ''} onChange={(e) => set('portfolio_url', e.target.value)} /><small>Drive, TikTok ou Instagram : 2 ou 3 vidéos face caméra. C’est ce qui compte le plus pour la vérification.</small></label>
+            <label className="f"><span>Lien vers d’autres vidéos <em>(facultatif)</em></span><input type="url" placeholder="https://" value={c.portfolio_url || ''} onChange={(e) => set('portfolio_url', e.target.value)} /><small>Drive, TikTok ou Instagram, si tu veux montrer plus que les vidéos ci-dessus.</small></label>
             <div className="fields two">
               <label className="f"><span>Instagram</span><input placeholder="@toncompte" value={c.instagram || ''} onChange={(e) => set('instagram', e.target.value)} /></label>
               <label className="f"><span>TikTok</span><input placeholder="@toncompte" value={c.tiktok || ''} onChange={(e) => set('tiktok', e.target.value)} /></label>
