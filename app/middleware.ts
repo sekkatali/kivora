@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { LAUNCH, ADMIN_ONLY_IN_LAUNCH } from '@/lib/launch';
+import { LAUNCH, ADMIN_ONLY_IN_LAUNCH, BRAND_OR_ADMIN_IN_LAUNCH } from '@/lib/launch';
 
 const PRIVATE = ['/createur', '/marque', '/admin'];
 const under = (path: string, list: string[]) => list.some((p) => path === p || path.startsWith(p + '/'));
@@ -38,6 +38,13 @@ export async function middleware(request: NextRequest) {
     if (!user) return go('/');
     const { data } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
     if (data?.role !== 'admin') return go('/');
+    return response;
+  }
+  // L'espace marque : ouvert aux comptes marque (créés par l'équipe) et aux admins.
+  if (LAUNCH && under(path, BRAND_OR_ADMIN_IN_LAUNCH)) {
+    if (!user) return go('/connexion', path);
+    const { data } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    if (data?.role !== 'brand' && data?.role !== 'admin') return go('/');
     return response;
   }
 

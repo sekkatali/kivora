@@ -9,7 +9,8 @@ Contenu du dossier :
 
 Pendant la préinscription :
 - l'accueil `/` est la page de préinscription créateurs (`/inscription` affiche la même page) ;
-- la vitrine marques (`/vitrine`), la demande d'accès marques (`/marques`) et l'espace marque (`/marque`) sont réservés aux admins ; les autres visiteurs sont renvoyés vers l'accueil ;
+- la vitrine marques (`/vitrine`) et la demande d'accès marques (`/marques`) sont réservées aux admins ; les autres visiteurs sont renvoyés vers l'accueil ;
+- l'espace marque (`/marque`) est ouvert aux comptes marque que vous créez vous-mêmes (et aux admins) ;
 - les créateurs inscrits gardent leur espace `/createur` (profil, tarifs, parrainage), et `/connexion` reste ouvert.
 
 Pour ouvrir le site aux marques : ajoute `NEXT_PUBLIC_LAUNCH_MODE=off` dans Vercel, puis redéploie.
