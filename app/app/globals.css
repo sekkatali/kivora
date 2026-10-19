@@ -625,7 +625,7 @@ html:has(.appmode),body:has(.appmode){background:#f4f6f0}
 .cc-opt input{accent-color:var(--forest);width:17px;height:17px;margin:0}
 .cc-opt b{font-weight:500;white-space:nowrap}
 .cc-opt:has(input:checked){background:#e6f5d3}
-.cat{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.cat{grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr))}
 .cc .hd .ava{color:#fff;font-size:14px}
 
 /* ===== espace créateur à onglets ===== */
