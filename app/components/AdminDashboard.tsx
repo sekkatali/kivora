@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import { dh, frError } from '@/lib/data';
 import { DashNav, useHashTab, type NavItem } from './DashNav';
 import BookingCard from './BookingCard';
-import { ALL_STATUSES, OPEN_STATUSES, PAID_STATUSES, STATUS_LABEL, type BookingRequest } from '@/lib/booking';
+import { ALL_STATUSES, OPEN_STATUSES, PAID_STATUSES, STATUS_LABEL, type BookingRequest, type BookingReview } from '@/lib/booking';
 
 const AE_SHORT: Record<string, string> = { oui: 'Oui', en_cours: 'En cours', non: 'Non' };
 
@@ -52,8 +52,9 @@ function Gate({ l, v, t, txt }: { l: string; v: number; t: number; txt: string }
   );
 }
 
-export default function AdminDashboard({ stats, creators, brands, packages, requests = [], requestsReady = true, error, userId = '' }: {
+export default function AdminDashboard({ stats, creators, brands, packages, requests = [], requestsReady = true, error, userId = '', reviewOn: reviewOn0 = true, reviewReady = true, reviews = [] }: {
   stats: Stats; creators: Creator[]; brands: Brand[]; packages: Pkg[]; requests?: BookingRequest[]; requestsReady?: boolean; error: string; userId?: string;
+  reviewOn?: boolean; reviewReady?: boolean; reviews?: BookingReview[];
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -70,6 +71,9 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
   const [toast, setToast] = useState(error ? `Erreur : ${error}` : '');
   const [spend, setSpend] = useState('');
   const [spendB, setSpendB] = useState('');
+  const [reviewOn, setReviewOn] = useState(reviewOn0);
+  const [swBusy, setSwBusy] = useState(false);
+  const reviewBy = useMemo(() => Object.fromEntries(reviews.map((v) => [v.booking_id, v])), [reviews]);
 
   useEffect(() => { try { setSpend(localStorage.getItem('kivora-spend') || ''); setSpendB(localStorage.getItem('kivora-spend-brands') || ''); } catch { /* rien */ } }, []);
   useEffect(() => { try { localStorage.setItem('kivora-spend', spend); localStorage.setItem('kivora-spend-brands', spendB); } catch { /* rien */ } }, [spend, spendB]);
@@ -125,6 +129,7 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
   const gmv = paidReq.reduce((a, r) => a + (r.total_mad || 0), 0);
   const openReq = rq.filter((r) => OPEN_STATUSES.includes(r.status));
   const toCash = rq.filter((r) => r.status === 'acceptee').length;
+  const toReview = rq.filter((r) => r.status === 'controle').length;
   const stale = rq.filter((r) => r.status === 'envoyee' && Date.now() - new Date(r.created_at).getTime() > 2 * 864e5).length;
 
   /* ---------- graphiques ---------- */
@@ -143,6 +148,19 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
     setCr((l) => l.map((x) => (x.id === c.id ? { ...x, status, admin_note: note.trim() || null, reviewed_at: new Date().toISOString() } : x)));
     say(status === 'approved' ? `${c.first_name} vérifié` : status === 'rejected' ? `${c.first_name} refusé` : 'Remis en attente');
     setOpen(null); router.refresh();
+  }
+  /** Interrupteur « Validation des contenus par Kivora ». En le coupant, les vidéos en attente partent aux marques. */
+  async function toggleReview() {
+    const next = !reviewOn;
+    const waiting = rq.filter((r) => r.status === 'controle').length;
+    if (!next && waiting && !confirm(`${waiting} vidéo${waiting > 1 ? 's attendent' : ' attend'} ton contrôle. En coupant la validation, ${waiting > 1 ? 'elles partent' : 'elle part'} tout de suite chez la marque. Continuer ?`)) return;
+    setSwBusy(true);
+    const { data, error: e } = await supabase.rpc('set_content_review', { p_on: next });
+    setSwBusy(false);
+    if (e) return say(frError(e.message));
+    setReviewOn(next);
+    if (!next && Number(data) > 0) { router.refresh(); setRq((l) => l.map((r) => (r.status === 'controle' ? { ...r, status: 'livree' } : r))); }
+    say(next ? 'Validation activée : les vidéos passent par toi avant la marque' : `Validation coupée : les vidéos vont directement aux marques${Number(data) > 0 ? ` (${data} envoyée${Number(data) > 1 ? 's' : ''})` : ''}`);
   }
   async function setBrand(b: Brand, status: Brand['status']) {
     const { error: e } = await supabase.from('brands').update({ status }).eq('id', b.id);
@@ -179,7 +197,7 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
     { id: 'apercu', label: 'Vue d’ensemble', icon: 'chart' },
     { id: 'createurs', label: 'Créateurs', icon: 'users', badge: pending || undefined },
     { id: 'marques', label: 'Marques', icon: 'building', badge: br.filter((b) => b.status === 'waitlist').length || undefined },
-    { id: 'demandes', label: 'Réservations', icon: 'inbox', badge: toCash || undefined },
+    { id: 'demandes', label: 'Réservations', icon: 'inbox', badge: toCash + toReview || undefined },
   ];
 
   return (
@@ -189,9 +207,10 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
 
         {tab === 'apercu' && (<>
           <div className="apphead"><h1>Vue d’ensemble</h1><p>Où en sont les paliers, et ce qui attend une action.</p></div>
-          {(pending > 0 || toCash > 0 || stale > 0) ? (
+          {(pending > 0 || toCash > 0 || toReview > 0 || stale > 0) ? (
             <div className="todo">
               {pending > 0 ? <button onClick={() => { setCFilter('pending'); setTab('createurs'); }}><i aria-hidden="true" /><span><b>{pending}</b> créateur{pending > 1 ? 's' : ''} à vérifier</span><em>Ouvrir →</em></button> : null}
+              {toReview > 0 ? <button onClick={() => { setRFilter('controle'); setTab('demandes'); }}><i aria-hidden="true" /><span><b>{toReview}</b> vidéo{toReview > 1 ? 's' : ''} à contrôler avant envoi à la marque</span><em>Ouvrir →</em></button> : null}
               {toCash > 0 ? <button onClick={() => { setRFilter('acceptee'); setTab('demandes'); }}><i aria-hidden="true" /><span><b>{toCash}</b> réservation{toCash > 1 ? 's' : ''} acceptée{toCash > 1 ? 's' : ''} : paiement à encaisser</span><em>Ouvrir →</em></button> : null}
               {stale > 0 ? <button onClick={() => { setRFilter('envoyee'); setTab('demandes'); }}><i aria-hidden="true" /><span><b>{stale}</b> demande{stale > 1 ? 's' : ''} sans réponse du créateur depuis 48 h</span><em>Voir →</em></button> : null}
             </div>
@@ -330,8 +349,19 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
         {tab === 'demandes' && (<>
           <div className="apphead"><h1>Réservations</h1><p>Les marques et les créateurs gèrent leurs réservations entre eux. Tu supervises, tu encaisses les paiements et tu interviens en cas de problème.</p></div>
           {!requestsReady ? <p className="empty">La table des réservations n’existe pas encore. Applique le script <b>supabase/migrations/09_booking_requests.sql</b> dans Supabase › SQL Editor.</p> : (<>
+            {reviewReady ? (
+              <div className="review-sw">
+                <div>
+                  <b id="sw-l">Validation des contenus par Kivora</b>
+                  <span>{reviewOn
+                    ? `Activée : chaque vidéo livrée passe par un admin avant d’arriver chez la marque.${toReview ? ` ${toReview} en attente.` : ''}`
+                    : 'Coupée : les vidéos livrées par les créateurs arrivent directement chez la marque.'}</span>
+                </div>
+                <button type="button" role="switch" className="sw" aria-checked={reviewOn} aria-labelledby="sw-l" disabled={swBusy} onClick={toggleReview} />
+              </div>
+            ) : null}
             <div className="tiles">
-              <div className="hi"><b>{openReq.length}</b><span>en cours · {toCash} à encaisser</span></div>
+              <div className="hi"><b>{openReq.length}</b><span>en cours · {toCash} à encaisser{reviewOn || toReview ? ` · ${toReview} à contrôler` : ''}</span></div>
               <div><b>{paidReq.length}</b><span>payées</span></div>
               <div><b>{delivered.length}</b><span>vidéos livrées · {validated.length} validées</span></div>
               <div><b>{dh(gmv)}</b><span>payé (prix créateurs)</span></div>
@@ -345,9 +375,9 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
               <button className="btn sm quiet" onClick={exportRequests}>Exporter en CSV</button>
             </div>
             {rRows.length === 0 ? <p className="empty">{rq.length === 0 ? 'Aucune réservation pour l’instant. Elles apparaissent quand une marque active envoie une demande à un créateur.' : 'Aucune réservation dans cette liste.'}</p>
-              : rRows.map((r) => {
+              : [...rRows].sort((x, y) => Number(y.status === 'controle') - Number(x.status === 'controle')).map((r) => {
                 const b = brandById[r.brand_id]; const c = creatorById[r.creator_id];
-                return <BookingCard key={r.id} r={r} role="admin" userId={userId} supabase={supabase} say={say}
+                return <BookingCard key={r.id} r={r} role="admin" userId={userId} supabase={supabase} say={say} review={reviewBy[r.id] || null} reviewOn={reviewOn}
                   onChange={(n) => setRq((l) => l.map((x) => (x.id === n.id ? n : x)))}
                   contacts={{ brand: b?.phone ? wa(b.phone, `Bonjour ${b.contact_name || ''}, c’est l’équipe Kivora au sujet de votre réservation avec ${r.creator_label}.`) : null,
                     creator: c?.phone ? wa(c.phone, `Bonjour ${c.first_name}, c’est l’équipe Kivora au sujet de ta réservation avec ${r.brand_company}.`) : null }} />;

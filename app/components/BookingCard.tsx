@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dh, frError } from '@/lib/data';
-import { ALL_STATUSES, STATUS_LABEL, needsAction, type BookingMessage, type BookingRequest } from '@/lib/booking';
+import { ALL_STATUSES, STATUS_LABEL, needsAction, type BookingMessage, type BookingRequest, type BookingReview } from '@/lib/booking';
 import { RequestSteps } from './DashNav';
 
 type Role = 'brand' | 'creator' | 'admin';
@@ -10,10 +10,14 @@ const ROLE_NAME: Record<Role, string> = { brand: 'Marque', creator: 'Créateur',
 const fmt = (s: string) => new Date(s).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 /** Une réservation, avec les actions de la personne connectée et la conversation. */
-export default function BookingCard({ r, role, userId, supabase, onChange, say, contacts }: {
+export default function BookingCard({ r, role, userId, supabase, onChange, say, contacts, review = null, reviewOn = false }: {
   r: BookingRequest; role: Role; userId: string; supabase: SupabaseClient;
   onChange: (r: BookingRequest) => void; say: (m: string) => void;
   contacts?: { brand?: string | null; creator?: string | null };
+  /** Vidéo en contrôle Kivora (créateur et admin seulement). */
+  review?: BookingReview | null;
+  /** La validation des contenus par Kivora est activée. */
+  reviewOn?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(r.creator_message || '');
@@ -24,13 +28,33 @@ export default function BookingCard({ r, role, userId, supabase, onChange, say, 
   const [admin, setAdmin] = useState(false);
   const [aStatus, setAStatus] = useState(r.status);
   const [aNote, setANote] = useState(r.admin_note || '');
+  const [rv, setRv] = useState<BookingReview | null>(review);
+  const [fix, setFix] = useState('');
+  const [fixing, setFixing] = useState(false);
 
   async function update(patch: Partial<BookingRequest>, done: string) {
     setBusy(true);
     const { data, error } = await supabase.from('booking_requests').update(patch).eq('id', r.id).select().single();
     setBusy(false);
     if (error) return say(frError(error.message));
-    onChange(data as BookingRequest); say(done);
+    const n = data as BookingRequest;
+    if (n.status === 'controle' && patch.delivery_url) {
+      setRv({ booking_id: r.id, url: patch.delivery_url, decision: 'en_attente', note: null, submitted_at: new Date().toISOString(), decided_at: null });
+      done = 'Vidéo envoyée : Kivora la vérifie avant de la transmettre à la marque';
+    }
+    onChange(n); say(done);
+  }
+  /** Admin : valider la vidéo contrôlée (elle part à la marque) ou demander une correction au créateur. */
+  async function decide(ok: boolean) {
+    if (!ok && !fix.trim()) return say('Explique au créateur ce qu’il doit corriger');
+    setBusy(true);
+    const { data, error } = await supabase.rpc('review_delivery', { p_booking: r.id, p_ok: ok, p_note: ok ? null : fix.trim() });
+    setBusy(false);
+    if (error) return say(frError(error.message));
+    if (rv) setRv({ ...rv, decision: ok ? 'approuvee' : 'a_corriger', note: ok ? rv.note : fix.trim(), decided_at: new Date().toISOString() });
+    setFix(''); setFixing(false);
+    onChange(data as BookingRequest);
+    say(ok ? 'Vidéo validée : la marque la reçoit' : 'Correction demandée au créateur');
   }
   async function openThread() {
     const next = !showThread; setShowThread(next);
@@ -61,7 +85,7 @@ export default function BookingCard({ r, role, userId, supabase, onChange, say, 
       <div className="rq-opts"><span>Vidéo {dh(r.base_price)}</span>{(r.options || []).map((o) => <span key={o.key}>{o.title} +{dh(o.price_mad)}</span>)}</div>
       {r.brief ? <details><summary className="small muted">Le brief</summary><p className="small pre">{r.brief}</p></details> : null}
       {r.creator_message ? <p className="rq-say"><b>{r.creator_label} :</b> {r.creator_message}</p> : null}
-      {r.delivery_url ? <p className="small"><b>Vidéo livrée :</b> <a className="link" href={r.delivery_url} target="_blank" rel="noopener nofollow">ouvrir le lien</a></p> : null}
+      {r.delivery_url ? <p className="small"><b>{r.status === 'controle' ? 'Version précédente :' : 'Vidéo livrée :'}</b> <a className="link" href={r.delivery_url} target="_blank" rel="noopener nofollow">ouvrir le lien</a></p> : null}
       {r.admin_note ? <p className="rq-note"><b>Kivora :</b> {r.admin_note}</p> : null}
 
       {/* ---------- actions du créateur ---------- */}
@@ -75,10 +99,14 @@ export default function BookingCard({ r, role, userId, supabase, onChange, say, 
         </div>
       ) : null}
       {role === 'creator' && r.status === 'acceptee' ? <p className="small muted">La marque règle sa commande à Kivora. Tu reçois une notification dès que c’est payé : tu pourras alors tourner.</p> : null}
+      {role === 'creator' && r.status === 'controle' ? (
+        <p className="rq-note">Ta vidéo est entre les mains de Kivora pour un contrôle qualité{rv ? <> (<a className="link" href={rv.url} target="_blank" rel="noopener nofollow">ton lien</a>)</> : null}. Elle part à la marque dès qu’elle est validée, en général sous 24 heures.</p>
+      ) : null}
       {role === 'creator' && (r.status === 'payee' || r.status === 'revision') ? (
         <div className="rq-act">
-          {r.status === 'revision' ? <p className="rq-note">La marque demande une révision. Regarde ses remarques dans la conversation, puis livre la nouvelle version.</p> : null}
-          <label className="f"><span>Lien de la vidéo</span><input type="url" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://drive.google.com/…" /><small>Drive, WeTransfer ou Dropbox. La marque doit pouvoir la télécharger.</small></label>
+          {rv?.decision === 'a_corriger' ? <p className="rq-note"><b>Kivora demande une correction :</b> {rv.note}</p>
+            : r.status === 'revision' ? <p className="rq-note">La marque demande une révision. Regarde ses remarques dans la conversation, puis livre la nouvelle version.</p> : null}
+          <label className="f"><span>Lien de la vidéo</span><input type="url" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://drive.google.com/…" /><small>Drive, WeTransfer ou Dropbox. La marque doit pouvoir la télécharger.{reviewOn ? ' Kivora la vérifie avant de l’envoyer à la marque.' : ''}</small></label>
           <button className="btn ink" style={{ justifySelf: 'start' }} disabled={busy || !/^https?:\/\/\S+\.\S+/.test(link.trim())} onClick={() => update({ status: 'livree', delivery_url: link.trim() }, 'Vidéo livrée')}>Livrer la vidéo</button>
         </div>
       ) : null}
@@ -86,6 +114,7 @@ export default function BookingCard({ r, role, userId, supabase, onChange, say, 
       {/* ---------- actions de la marque ---------- */}
       {role === 'brand' && r.status === 'envoyee' ? <p className="small muted">Le créateur accepte ou refuse votre demande, en général sous 48 heures.</p> : null}
       {role === 'brand' && r.status === 'acceptee' ? <p className="rq-note">{r.creator_label} a accepté. Kivora vous envoie le lien de paiement ; le tournage commence dès réception.</p> : null}
+      {role === 'brand' && r.status === 'controle' ? <p className="rq-note">{r.creator_label} a livré{r.revisions ? ' la nouvelle version' : ' la vidéo'}. Kivora fait un contrôle qualité avant de vous l’envoyer, en général sous 24 heures.</p> : null}
       {role === 'brand' && r.status === 'livree' ? (
         <div className="rq-act">
           <p className="small">Regardez la vidéo, puis validez-la. La validation déclenche le paiement du créateur et vous cède les droits publicitaires.</p>
@@ -100,6 +129,26 @@ export default function BookingCard({ r, role, userId, supabase, onChange, say, 
       ) : null}
 
       {/* ---------- supervision ---------- */}
+      {role === 'admin' && r.status === 'controle' ? (
+        <div className="rq-act rq-review">
+          <p className="small"><b>À contrôler</b>{rv ? <> · envoyée le {fmt(rv.submitted_at)}</> : null}. La marque ne voit pas cette vidéo tant que tu ne l’as pas validée.</p>
+          {rv ? <a className="btn quiet sm" style={{ justifySelf: 'start' }} href={rv.url} target="_blank" rel="noopener nofollow">Regarder la vidéo</a> : <p className="small muted">Lien introuvable : recharge la page.</p>}
+          {fixing ? (
+            <label className="f"><span>Ce que le créateur doit corriger <em>(lui seul le voit)</em></span><textarea rows={2} value={fix} onChange={(e) => setFix(e.target.value)} placeholder="Ex. Le son est trop bas et le produit n’apparaît pas dans les 3 premières secondes." /></label>
+          ) : null}
+          <div className="savebar">
+            {fixing ? <>
+              <button className="btn ink sm" disabled={busy || !fix.trim()} onClick={() => decide(false)}>Renvoyer au créateur</button>
+              <button className="btn quiet sm" disabled={busy} onClick={() => setFixing(false)}>Annuler</button>
+            </> : <>
+              <button className="btn ink sm" disabled={busy} onClick={() => decide(true)}>Valider et envoyer à la marque</button>
+              <button className="btn quiet sm" disabled={busy} onClick={() => setFixing(true)}>Demander une correction</button>
+            </>}
+          </div>
+        </div>
+      ) : null}
+      {role === 'admin' && r.status !== 'controle' && rv?.decision === 'approuvee' ? <p className="small muted">✓ Contrôlée par Kivora le {fmt(rv.decided_at || rv.submitted_at)}</p> : null}
+      {role === 'admin' && r.status !== 'controle' && rv?.decision === 'a_corriger' ? <p className="small muted">Correction demandée au créateur : {rv.note}</p> : null}
       {role === 'admin' ? (
         <div className="rq-act">
           <div className="savebar">

@@ -21,11 +21,14 @@ Le parcours se fait directement entre la marque et le créateur :
 2. le créateur l'accepte ou la refuse ;
 3. Kivora encaisse le paiement (l'admin marque « payée » tant que le paiement en ligne n'existe pas) ;
 4. le créateur livre le lien de la vidéo ;
-5. la marque valide, ou demande une révision (deux au maximum).
+5. si la **validation des contenus** est activée, un admin regarde la vidéo et la valide (elle part alors à la marque) ou demande une correction au créateur ;
+6. la marque valide, ou demande une révision (deux au maximum).
+
+**Validation des contenus par Kivora** : un interrupteur en haut de l'onglet Réservations de l'admin. Activé (réglage par défaut), chaque vidéo livrée passe par un admin avant d'arriver chez la marque, et la marque ne peut pas voir le lien avant. Coupé, les vidéos vont directement aux marques ; celles qui attendaient un contrôle leur sont envoyées tout de suite.
 
 Chaque réservation a sa conversation. L'admin supervise tout dans l'onglet Réservations et peut intervenir (statut, note visible des deux parties) en cas de litige. Les règles sont appliquées par la base : chacun ne peut faire que ses propres étapes, et le prix ne peut pas être modifié.
 
-À faire une fois : coller `supabase/migrations/09_booking_requests.sql` dans Supabase › SQL Editor › Run. Tant que ce n'est pas fait, les demandes des marques passent par WhatsApp (variable `NEXT_PUBLIC_WHATSAPP`).
+Les scripts `supabase/migrations/09_booking_requests.sql` et `11_content_review.sql` sont déjà appliqués sur le projet KIVORA. Sur une nouvelle base, colle-les dans cet ordre dans Supabase › SQL Editor › Run.
 
 ## Ce qu'il y a dedans
 

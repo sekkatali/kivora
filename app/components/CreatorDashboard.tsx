@@ -5,7 +5,7 @@ import { CITIES, NICHES, LANGUAGES, frError, dh, initials, WHATSAPP } from '@/li
 import { cleanHandle, cleanPhone, phoneOk } from './CreatorSignup';
 import { OPTIONS } from '@/lib/i18n';
 import BookingCard from './BookingCard';
-import { STATUS_LABEL, needsAction, type BookingRequest } from '@/lib/booking';
+import { STATUS_LABEL, needsAction, type BookingRequest, type BookingReview } from '@/lib/booking';
 
 type Creator = {
   id: string; first_name: string; last_name: string; phone: string | null; city: string | null; languages: string[]; niches: string[];
@@ -62,7 +62,7 @@ function Fiche({ c, price, opts }: { c: Creator; price: string; opts: Record<str
   );
 }
 
-export default function CreatorDashboard({ creator, packages, referrals, email, bookings = [] }: { creator: Creator; packages: Pkg[]; referrals: number; email?: string | null; bookings?: BookingRequest[] }) {
+export default function CreatorDashboard({ creator, packages, referrals, email, bookings = [], reviews = [], reviewOn = false }: { creator: Creator; packages: Pkg[]; referrals: number; email?: string | null; bookings?: BookingRequest[]; reviews?: BookingReview[]; reviewOn?: boolean }) {
   const supabase = useMemo(() => createClient(), []);
   const [tab, setTabState] = useState<Tab>('accueil');
   const [c, setC] = useState(creator);
@@ -250,7 +250,7 @@ export default function CreatorDashboard({ creator, packages, referrals, email, 
           <div className="apphead"><h1>Réservations</h1><p>Les demandes des marques : accepte ou refuse, livre ta vidéo et échange avec la marque dans la conversation.</p></div>
           {bk.length === 0 ? <p className="empty">Aucune demande pour l’instant. Dès qu’une marque te choisit, la demande apparaît ici et on te prévient sur WhatsApp.</p>
             : [...bk].sort((x, y) => Number(needsAction(y, 'creator')) - Number(needsAction(x, 'creator'))).map((r) => (
-              <BookingCard key={r.id} r={r} role="creator" userId={c.id} supabase={supabase} say={say} onChange={(n) => setBk((l) => l.map((x) => (x.id === n.id ? n : x)))} />
+              <BookingCard key={r.id} r={r} role="creator" userId={c.id} supabase={supabase} say={say} review={reviews.find((v) => v.booking_id === r.id) || null} reviewOn={reviewOn} onChange={(n) => setBk((l) => l.map((x) => (x.id === n.id ? n : x)))} />
             ))}
           <p className="small muted">Tu es payé par virement après la validation de la marque. Le paiement passe toujours par Kivora.</p>
         </>)}

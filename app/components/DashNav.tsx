@@ -54,11 +54,11 @@ export function DashNav<T extends string>({ items, tab, onChange, label }: { ite
 /** Barre d'avancement d'une réservation. */
 export function RequestSteps({ status }: { status: string }) {
   if (status === 'annulee' || status === 'refusee') return <span className="tag bad">{STATUS_LABEL[status]}</span>;
-  const pos = status === 'revision' ? 'livree' : status;
+  const pos = status === 'revision' || status === 'controle' ? 'livree' : status;
   const i = STATUS_FLOW.indexOf(pos as (typeof STATUS_FLOW)[number]);
   return (
     <ol className="rq-steps" aria-label={`Statut : ${STATUS_LABEL[status] || status}`}>
-      {STATUS_FLOW.map((s, k) => <li key={s} className={k < i ? 'done' : k === i ? 'now' : ''}><i /><span>{k === i && status === 'revision' ? 'Révision' : STATUS_LABEL[s]}</span></li>)}
+      {STATUS_FLOW.map((s, k) => <li key={s} className={k < i ? 'done' : k === i ? 'now' : ''}><i /><span>{k === i && status === 'revision' ? 'Révision' : k === i && status === 'controle' ? 'Contrôle' : STATUS_LABEL[s]}</span></li>)}
     </ol>
   );
 }
