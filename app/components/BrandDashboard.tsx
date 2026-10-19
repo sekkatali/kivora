@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { CITIES, NICHES, SECTORS, BUDGETS, LANGUAGES, dh, initials, toneFor, frError, WHATSAPP } from '@/lib/data';
 import { track } from '@/lib/track';
-import { DashNav, useHashTab, RequestSteps, STATUS_LABEL, isMissingTable, type NavItem, type BookingRequest } from './DashNav';
+import { DashNav, useHashTab, type NavItem } from './DashNav';
+import BookingCard from './BookingCard';
+import { OPEN_STATUSES, PAID_STATUSES, isMissingTable, needsAction, type BookingRequest } from '@/lib/booking';
 
 type Brand = { id: string; company: string; contact_name: string | null; phone: string | null; website: string | null; ice: string | null; sector: string | null; monthly_budget: string | null; status: 'waitlist' | 'active'; created_at?: string };
 type Card = { id: string; first_name: string; last_initial: string; city: string | null; languages: string[]; niches: string[]; instagram: string | null; tiktok: string | null; followers: number | null; portfolio_url: string | null; bio: string | null; min_price: number | null; packages: { key: string; title: string; price_mad: number }[] };
@@ -45,9 +47,10 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
   const shown = (list || []).filter((c) =>
     (!f.max || (c.min_price ?? 0) <= Number(f.max)) && (!f.lang || c.languages.includes(f.lang))
     && (!f.q || `${c.first_name} ${c.bio || ''} ${c.niches.join(' ')}`.toLowerCase().includes(f.q.toLowerCase())));
-  const inProgress = reqs.filter((r) => !['validee', 'annulee'].includes(r.status));
-  const delivered = reqs.filter((r) => ['livree', 'validee'].includes(r.status));
-  const spent = reqs.filter((r) => ['payee', 'en_tournage', 'livree', 'validee'].includes(r.status)).reduce((a, r) => a + (r.total_mad || 0), 0);
+  const inProgress = reqs.filter((r) => OPEN_STATUSES.includes(r.status));
+  const delivered = reqs.filter((r) => ['livree', 'revision', 'validee'].includes(r.status));
+  const spent = reqs.filter((r) => PAID_STATUSES.includes(r.status)).reduce((a, r) => a + (r.total_mad || 0), 0);
+  const toDo = reqs.filter((r) => needsAction(r, 'brand')).length;
 
   function openCreator(c: Card) { setOpen(c); setPicked([]); setSent(null); setBrief((x) => ({ ...x, consignes: '' })); }
   const total = open ? (open.min_price || 0) + open.packages.filter((p) => picked.includes(p.key)).reduce((a, p) => a + p.price_mad, 0) : 0;
@@ -89,7 +92,7 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
   const nav: NavItem<Tab>[] = [
     { id: 'accueil', label: 'Accueil', icon: 'home' },
     { id: 'catalogue', label: 'Catalogue', icon: 'grid' },
-    { id: 'demandes', label: 'Mes demandes', icon: 'inbox', badge: inProgress.length || undefined },
+    { id: 'demandes', label: 'Réservations', icon: 'inbox', badge: toDo || undefined },
     { id: 'marque', label: 'Ma marque', icon: 'building', dot: brandDirty },
     { id: 'compte', label: 'Compte', icon: 'gear' },
   ];
@@ -102,13 +105,13 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
         {tab === 'accueil' && (<>
           <div className="apphead"><h1>{b.company || 'Votre marque'}</h1><p>{active ? 'Votre accès au catalogue est ouvert.' : 'Vous êtes sur la liste d’accès anticipé.'}</p></div>
           {active ? (
-            <div className="status approved"><span className="ic" aria-hidden="true">✓</span><div><b>Accès au catalogue ouvert</b><p>Choisissez un créateur, ses options et décrivez votre produit : l’équipe confirme la réservation avec vous.</p></div></div>
+            <div className="status approved"><span className="ic" aria-hidden="true">✓</span><div><b>Accès au catalogue ouvert</b><p>Choisissez un créateur, ses options et décrivez votre produit : le créateur accepte, tourne et vous livre directement.</p></div></div>
           ) : (
             <div className="status pending"><span className="ic" aria-hidden="true">…</span><div><b>Accès anticipé demandé</b><p>Les premières marques sont invitées par vagues, dès que le catalogue est complet dans votre secteur. On vous recontacte pour une démo.</p></div></div>
           )}
           <div className="tiles">
             <button className="hi" onClick={() => setTab('catalogue')}><b>{active ? (list ? list.length : '…') : '—'}</b><span>créateurs disponibles</span></button>
-            <button onClick={() => setTab('demandes')}><b>{inProgress.length}</b><span>demande{inProgress.length > 1 ? 's' : ''} en cours</span></button>
+            <button onClick={() => setTab('demandes')}><b>{inProgress.length}</b><span>réservation{inProgress.length > 1 ? 's' : ''} en cours</span></button>
             <button onClick={() => setTab('demandes')}><b>{delivered.length}</b><span>vidéo{delivered.length > 1 ? 's' : ''} livrée{delivered.length > 1 ? 's' : ''}</span></button>
             <div><b>{dh(spent)}</b><span>réservé, prix créateurs</span></div>
           </div>
@@ -116,8 +119,8 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
             <h2 id="h-how" style={{ fontSize: 19, fontWeight: 500 }}>Comment ça marche</h2>
             <ol className="howto">
               <li><b>Choisissez</b><span>Filtrez par ville, niche, langue et budget. Chaque créateur affiche son prix et ses options.</span></li>
-              <li><b>Demandez</b><span>Cochez les options, décrivez votre produit. L’équipe confirme sous 24 h.</span></li>
-              <li><b>Recevez</b><span>Envoyez le produit ; la vidéo arrive en 5 jours environ, deux révisions incluses.</span></li>
+              <li><b>Demandez</b><span>Cochez les options, décrivez votre produit. Le créateur accepte en général sous 48 h.</span></li>
+              <li><b>Recevez</b><span>Réglez la commande, envoyez le produit ; la vidéo arrive en 5 jours environ, deux révisions incluses.</span></li>
               <li><b>Validez</b><span>Le créateur est payé à la validation. La vidéo est à vous, pour toutes vos publicités.</span></li>
             </ol>
           </section>
@@ -161,19 +164,13 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
         </>))}
 
         {tab === 'demandes' && (<>
-          <div className="apphead"><h1>Mes demandes</h1><p>Le suivi de chaque vidéo, de la demande à la validation.</p></div>
-          {!requestsReady ? <p className="empty">Le suivi des demandes arrive très bientôt. En attendant, vos demandes passent par WhatsApp.</p>
+          <div className="apphead"><h1>Réservations</h1><p>Chaque vidéo, de la demande à la validation. Échangez avec le créateur dans la conversation.</p></div>
+          {!requestsReady ? <p className="empty">Le suivi des réservations arrive très bientôt. En attendant, vos demandes passent par WhatsApp.</p>
             : reqs.length === 0 ? (
-              <div className="locked"><h2>Aucune demande pour l’instant</h2><p className="muted">{active ? 'Choisissez un créateur dans le catalogue pour lancer votre première vidéo.' : 'Vous pourrez demander vos premières vidéos dès l’ouverture de votre accès.'}</p>
+              <div className="locked"><h2>Aucune réservation pour l’instant</h2><p className="muted">{active ? 'Choisissez un créateur dans le catalogue pour lancer votre première vidéo.' : 'Vous pourrez réserver vos premières vidéos dès l’ouverture de votre accès.'}</p>
                 {active ? <button className="btn ink" onClick={() => setTab('catalogue')}>Parcourir le catalogue</button> : null}</div>
-            ) : reqs.map((r) => (
-              <article className="rq" key={r.id}>
-                <div className="rq-h"><div><b>{r.creator_label || 'Créateur'}</b><span>Demandée le {new Date(r.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} · {STATUS_LABEL[r.status]}</span></div><span className="amt">{dh(r.total_mad)}</span></div>
-                <RequestSteps status={r.status} />
-                {r.options?.length ? <div className="rq-opts">{r.options.map((o) => <span key={o.key}>{o.title} +{dh(o.price_mad)}</span>)}</div> : null}
-                {r.admin_note ? <p className="rq-note">{r.admin_note}</p> : null}
-                {r.brief ? <details><summary className="small muted" style={{ cursor: 'pointer' }}>Votre brief</summary><p className="small" style={{ whiteSpace: 'pre-line', marginTop: 6 }}>{r.brief}</p></details> : null}
-              </article>
+            ) : [...reqs].sort((x, y) => Number(needsAction(y, 'brand')) - Number(needsAction(x, 'brand'))).map((r) => (
+              <BookingCard key={r.id} r={r} role="brand" userId={b.id} supabase={supabase} say={say} onChange={(n) => setReqs((l) => l.map((x) => (x.id === n.id ? n : x)))} />
             ))}
         </>)}
 
@@ -226,12 +223,11 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
               <span><b>{open.first_name} {open.last_initial}.</b><span>{open.city} · {open.niches.join(', ')}</span></span></div>
           </div>
           {sent === 'whatsapp' ? (<>
-            <p>Envoyez votre demande à l’équipe sur WhatsApp : elle confirme la disponibilité du créateur et vous envoie le devis.</p>
+            <p>Le suivi en ligne n’est pas encore activé : envoyez votre demande à l’équipe sur WhatsApp, elle la transmet au créateur.</p>
             {WHATSAPP ? <a className="btn ink big" href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(waText)}`} target="_blank" rel="noopener">Envoyer sur WhatsApp</a> : <p className="err">Numéro WhatsApp de l’équipe non configuré.</p>}
           </>) : sent ? (<>
-            <p className="okbox">Votre demande à {dh(sent.total_mad)} est enregistrée. L’équipe confirme la disponibilité du créateur sous 24 h et vous envoie le devis.</p>
-            <button className="btn ink" onClick={() => { setOpen(null); setTab('demandes'); }}>Suivre ma demande</button>
-            {WHATSAPP ? <a className="link" href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent(waText)}`} target="_blank" rel="noopener">Prévenir l’équipe sur WhatsApp</a> : null}
+            <p className="okbox">Votre demande à {dh(sent.total_mad)} est envoyée à {open.first_name}. Il l’accepte ou la refuse, en général sous 48 heures ; vous êtes prévenu dans l’onglet Réservations.</p>
+            <button className="btn ink" onClick={() => { setOpen(null); setTab('demandes'); }}>Suivre ma réservation</button>
           </>) : (<>
             <div className="pkl">
               <div><span>Vidéo UGC<small>jusqu’à 30 s, 2 révisions</small></span><b>{dh(open.min_price)}</b></div>
@@ -247,7 +243,7 @@ export default function BrandDashboard({ brand, email, requests = [], requestsRe
               <div><span>Vidéo</span><span>{dh(open.min_price)}</span></div>
               {open.packages.filter((p) => picked.includes(p.key)).map((p) => <div key={p.key}><span>{p.title}</span><span>+ {dh(p.price_mad)}</span></div>)}
               <span className="t">{dh(total)}</span>
-              <small>Prix du créateur. Les frais de service et la TVA figurent sur le devis.</small>
+              <small>Prix du créateur. Les frais de service et la TVA s’ajoutent au paiement.</small>
             </div>
             <button className="btn ink big" onClick={sendRequest} disabled={sending}>{sending ? 'Envoi…' : 'Envoyer la demande'}</button>
           </>)}

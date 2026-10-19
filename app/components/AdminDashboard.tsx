@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { dh, frError } from '@/lib/data';
-import { DashNav, useHashTab, RequestSteps, type NavItem } from './DashNav';
-import { STATUS_FLOW, STATUS_LABEL, type BookingRequest } from '@/lib/booking';
+import { DashNav, useHashTab, type NavItem } from './DashNav';
+import BookingCard from './BookingCard';
+import { ALL_STATUSES, OPEN_STATUSES, PAID_STATUSES, STATUS_LABEL, type BookingRequest } from '@/lib/booking';
 
 const AE_SHORT: Record<string, string> = { oui: 'Oui', en_cours: 'En cours', non: 'Non' };
 
@@ -27,7 +28,6 @@ const TABS = ['apercu', 'createurs', 'marques', 'demandes'] as const;
 /* Paliers du plan de lancement */
 const P1 = { approved: 100, perNiche: 15, niches: 4, perCity: 15, cities: 3, aePct: 30, cpl: 20 };
 const P2 = { brands: 20, videos: 40, validatedPct: 80, reorderPct: 40, cac: 1000 };
-const PAID = ['payee', 'en_tournage', 'livree', 'validee'];
 const ST_LABEL = { pending: 'À vérifier', approved: 'Vérifié', rejected: 'Refusé' } as const;
 const ST_TAG = { pending: 'warn', approved: 'good', rejected: 'bad' } as const;
 const fmtDate = (s: string) => new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
@@ -52,8 +52,8 @@ function Gate({ l, v, t, txt }: { l: string; v: number; t: number; txt: string }
   );
 }
 
-export default function AdminDashboard({ stats, creators, brands, packages, requests = [], requestsReady = true, error }: {
-  stats: Stats; creators: Creator[]; brands: Brand[]; packages: Pkg[]; requests?: BookingRequest[]; requestsReady?: boolean; error: string;
+export default function AdminDashboard({ stats, creators, brands, packages, requests = [], requestsReady = true, error, userId = '' }: {
+  stats: Stats; creators: Creator[]; brands: Brand[]; packages: Pkg[]; requests?: BookingRequest[]; requestsReady?: boolean; error: string; userId?: string;
 }) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -107,9 +107,9 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
   const p1ok = p1.every((g) => g.v >= g.t) && cpl != null && cpl < P1.cpl;
 
   /* ---------- indicateurs palier 2 ---------- */
-  const paidReq = rq.filter((r) => PAID.includes(r.status));
+  const paidReq = rq.filter((r) => PAID_STATUSES.includes(r.status));
   const payingBrands = new Set(paidReq.map((r) => r.brand_id));
-  const delivered = rq.filter((r) => ['livree', 'validee'].includes(r.status));
+  const delivered = rq.filter((r) => ['livree', 'revision', 'validee'].includes(r.status));
   const validated = rq.filter((r) => r.status === 'validee');
   const validatedPct = delivered.length ? Math.round((validated.length / delivered.length) * 100) : 0;
   const perBrand: Record<string, number> = {};
@@ -123,8 +123,9 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
     { l: 'Marques qui recommandent', v: reorderPct, t: P2.reorderPct, txt: `${reorderPct} % (objectif ${P2.reorderPct} %)` },
   ];
   const gmv = paidReq.reduce((a, r) => a + (r.total_mad || 0), 0);
-  const openReq = rq.filter((r) => !['validee', 'annulee'].includes(r.status));
-  const newReq = rq.filter((r) => r.status === 'nouvelle').length;
+  const openReq = rq.filter((r) => OPEN_STATUSES.includes(r.status));
+  const toCash = rq.filter((r) => r.status === 'acceptee').length;
+  const stale = rq.filter((r) => r.status === 'envoyee' && Date.now() - new Date(r.created_at).getTime() > 2 * 864e5).length;
 
   /* ---------- graphiques ---------- */
   const byDay = (stats.by_day || {}) as Record<string, number>;
@@ -149,17 +150,12 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
     setBr((l) => l.map((x) => (x.id === b.id ? { ...x, status } : x)));
     say(status === 'active' ? `${b.company} a accès au catalogue` : `${b.company} remis en liste d’attente`);
   }
-  async function setRequest(r: BookingRequest, patch: Partial<BookingRequest>) {
-    const { data, error: e } = await supabase.from('booking_requests').update(patch).eq('id', r.id).select().single();
-    if (e) return say(frError(e.message));
-    setRq((l) => l.map((x) => (x.id === r.id ? (data as BookingRequest) : x)));
-    say(patch.status ? `Demande : ${STATUS_LABEL[patch.status]}` : 'Note enregistrée');
-  }
+
 
   const ql = q.trim().toLowerCase();
   const cRows = cr.filter((c) => (cFilter === 'all' || c.status === cFilter) && (!ql || `${c.first_name} ${c.last_name} ${c.city} ${c.profiles?.email} ${c.instagram} ${c.tiktok} ${c.niches.join(' ')}`.toLowerCase().includes(ql)));
   const bRows = br.filter((b) => (bFilter === 'all' || b.status === bFilter) && (!ql || `${b.company} ${b.contact_name} ${b.profiles?.email} ${b.sector}`.toLowerCase().includes(ql)));
-  const rRows = rq.filter((r) => (rFilter === 'toutes' || (rFilter === 'ouvertes' ? !['validee', 'annulee'].includes(r.status) : r.status === rFilter))
+  const rRows = rq.filter((r) => (rFilter === 'toutes' || (rFilter === 'ouvertes' ? OPEN_STATUSES.includes(r.status) : r.status === rFilter))
     && (!ql || `${r.brand_company} ${r.creator_label} ${r.brief}`.toLowerCase().includes(ql)));
   const reqCount = (bid: string) => rq.filter((r) => r.brand_id === bid).length;
 
@@ -176,14 +172,14 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
   })), 'kivora-marques');
   const exportRequests = () => csv(rq.map((r) => ({
     date: r.created_at, marque: r.brand_company, createur: r.creator_label, prix_createur: r.base_price, options: (r.options || []).map((o) => `${o.title} +${o.price_mad}`),
-    total_createur: r.total_mad, statut: STATUS_LABEL[r.status], brief: r.brief, note: r.admin_note,
+    total_createur: r.total_mad, statut: STATUS_LABEL[r.status], revisions: r.revisions, livraison: r.delivery_url, payee_le: r.paid_at, livree_le: r.delivered_at, validee_le: r.validated_at, brief: r.brief, note_kivora: r.admin_note,
   })), 'kivora-demandes');
 
   const nav: NavItem<Tab>[] = [
     { id: 'apercu', label: 'Vue d’ensemble', icon: 'chart' },
     { id: 'createurs', label: 'Créateurs', icon: 'users', badge: pending || undefined },
     { id: 'marques', label: 'Marques', icon: 'building', badge: br.filter((b) => b.status === 'waitlist').length || undefined },
-    { id: 'demandes', label: 'Demandes', icon: 'inbox', badge: newReq || undefined },
+    { id: 'demandes', label: 'Réservations', icon: 'inbox', badge: toCash || undefined },
   ];
 
   return (
@@ -193,10 +189,11 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
 
         {tab === 'apercu' && (<>
           <div className="apphead"><h1>Vue d’ensemble</h1><p>Où en sont les paliers, et ce qui attend une action.</p></div>
-          {(pending > 0 || newReq > 0) ? (
+          {(pending > 0 || toCash > 0 || stale > 0) ? (
             <div className="todo">
               {pending > 0 ? <button onClick={() => { setCFilter('pending'); setTab('createurs'); }}><i aria-hidden="true" /><span><b>{pending}</b> créateur{pending > 1 ? 's' : ''} à vérifier</span><em>Ouvrir →</em></button> : null}
-              {newReq > 0 ? <button onClick={() => { setRFilter('nouvelle'); setTab('demandes'); }}><i aria-hidden="true" /><span><b>{newReq}</b> nouvelle{newReq > 1 ? 's' : ''} demande{newReq > 1 ? 's' : ''} de réservation</span><em>Ouvrir →</em></button> : null}
+              {toCash > 0 ? <button onClick={() => { setRFilter('acceptee'); setTab('demandes'); }}><i aria-hidden="true" /><span><b>{toCash}</b> réservation{toCash > 1 ? 's' : ''} acceptée{toCash > 1 ? 's' : ''} : paiement à encaisser</span><em>Ouvrir →</em></button> : null}
+              {stale > 0 ? <button onClick={() => { setRFilter('envoyee'); setTab('demandes'); }}><i aria-hidden="true" /><span><b>{stale}</b> demande{stale > 1 ? 's' : ''} sans réponse du créateur depuis 48 h</span><em>Voir →</em></button> : null}
             </div>
           ) : null}
           <div className="tiles">
@@ -331,47 +328,29 @@ export default function AdminDashboard({ stats, creators, brands, packages, requ
         </>)}
 
         {tab === 'demandes' && (<>
-          <div className="apphead"><h1>Demandes de réservation</h1><p>Fais avancer chaque demande ; la marque voit le statut et ta note dans son espace, le créateur la voit dès qu’elle est confirmée.</p></div>
-          {!requestsReady ? <p className="empty">La table des demandes n’existe pas encore. Applique le script <b>supabase/migrations/09_booking_requests.sql</b> dans Supabase › SQL Editor.</p> : (<>
+          <div className="apphead"><h1>Réservations</h1><p>Les marques et les créateurs gèrent leurs réservations entre eux. Tu supervises, tu encaisses les paiements et tu interviens en cas de problème.</p></div>
+          {!requestsReady ? <p className="empty">La table des réservations n’existe pas encore. Applique le script <b>supabase/migrations/09_booking_requests.sql</b> dans Supabase › SQL Editor.</p> : (<>
             <div className="tiles">
-              <div className="hi"><b>{openReq.length}</b><span>demandes ouvertes · {newReq} nouvelle{newReq > 1 ? 's' : ''}</span></div>
-              <div><b>{paidReq.length}</b><span>payées ou plus</span></div>
-              <div><b>{delivered.length}</b><span>vidéos livrées</span></div>
-              <div><b>{dh(gmv)}</b><span>réservé (prix créateurs)</span></div>
+              <div className="hi"><b>{openReq.length}</b><span>en cours · {toCash} à encaisser</span></div>
+              <div><b>{paidReq.length}</b><span>payées</span></div>
+              <div><b>{delivered.length}</b><span>vidéos livrées · {validated.length} validées</span></div>
+              <div><b>{dh(gmv)}</b><span>payé (prix créateurs)</span></div>
             </div>
             <div className="toolbar">
               <select aria-label="Statut" value={rFilter} onChange={(e) => setRFilter(e.target.value)}>
-                <option value="ouvertes">Ouvertes ({openReq.length})</option><option value="toutes">Toutes ({rq.length})</option>
-                {[...STATUS_FLOW, 'annulee'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s]} ({rq.filter((r) => r.status === s).length})</option>)}
+                <option value="ouvertes">En cours ({openReq.length})</option><option value="toutes">Toutes ({rq.length})</option>
+                {ALL_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]} ({rq.filter((r) => r.status === s).length})</option>)}
               </select>
               <input type="search" placeholder="Marque, créateur, produit…" value={q} onChange={(e) => setQ(e.target.value)} />
               <button className="btn sm quiet" onClick={exportRequests}>Exporter en CSV</button>
             </div>
-            {rRows.length === 0 ? <p className="empty">{rq.length === 0 ? 'Aucune demande pour l’instant. Elles arrivent quand une marque active clique sur « Demander une vidéo ».' : 'Aucune demande dans cette liste.'}</p>
+            {rRows.length === 0 ? <p className="empty">{rq.length === 0 ? 'Aucune réservation pour l’instant. Elles apparaissent quand une marque active envoie une demande à un créateur.' : 'Aucune réservation dans cette liste.'}</p>
               : rRows.map((r) => {
                 const b = brandById[r.brand_id]; const c = creatorById[r.creator_id];
-                return (
-                  <article className="rq" key={r.id}>
-                    <div className="rq-h">
-                      <div><b>{r.brand_company} → {r.creator_label}</b><span>{new Date(r.created_at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span></div>
-                      <span className="amt">{dh(r.total_mad)}</span>
-                    </div>
-                    <RequestSteps status={r.status} />
-                    {r.options?.length ? <div className="rq-opts"><span>Vidéo {dh(r.base_price)}</span>{r.options.map((o) => <span key={o.key}>{o.title} +{dh(o.price_mad)}</span>)}</div> : <div className="rq-opts"><span>Vidéo {dh(r.base_price)}, sans option</span></div>}
-                    {r.brief ? <p className="small" style={{ whiteSpace: 'pre-line' }}>{r.brief}</p> : null}
-                    <div className="toolbar rq-table">
-                      <select aria-label="Statut" value={r.status} onChange={(e) => setRequest(r, { status: e.target.value })}>
-                        {[...STATUS_FLOW, 'annulee'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
-                      </select>
-                      {b?.phone ? <a className="btn sm quiet" href={wa(b.phone, `Bonjour ${b.contact_name || ''}, c’est l’équipe Kivora au sujet de votre demande avec ${r.creator_label}.`)} target="_blank" rel="noopener">WhatsApp marque</a> : null}
-                      {c?.phone ? <a className="btn sm quiet" href={wa(c.phone, `Bonjour ${c.first_name}, une marque (${r.brand_company}) souhaite réserver une vidéo avec toi.`)} target="_blank" rel="noopener">WhatsApp créateur</a> : null}
-                    </div>
-                    <form className="savebar" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem('note') as HTMLInputElement).value; setRequest(r, { admin_note: v.trim() || null }); }}>
-                      <label className="f" style={{ flex: 1, minWidth: 220 }}><span className="sr">Note pour la marque</span><input name="note" defaultValue={r.admin_note || ''} placeholder="Note visible par la marque (ex. devis envoyé par e-mail)" /></label>
-                      <button className="btn sm ink">Enregistrer la note</button>
-                    </form>
-                  </article>
-                );
+                return <BookingCard key={r.id} r={r} role="admin" userId={userId} supabase={supabase} say={say}
+                  onChange={(n) => setRq((l) => l.map((x) => (x.id === n.id ? n : x)))}
+                  contacts={{ brand: b?.phone ? wa(b.phone, `Bonjour ${b.contact_name || ''}, c’est l’équipe Kivora au sujet de votre réservation avec ${r.creator_label}.`) : null,
+                    creator: c?.phone ? wa(c.phone, `Bonjour ${c.first_name}, c’est l’équipe Kivora au sujet de ta réservation avec ${r.brand_company}.`) : null }} />;
               })}
           </>)}
         </>)}

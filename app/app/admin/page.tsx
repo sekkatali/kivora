@@ -25,7 +25,7 @@ export default async function AdminPage() {
     <div className="appmode">
       <AppBar label="Admin" email={user.email} />
       <AdminDashboard stats={stats.data ?? {}} creators={creators.data ?? []} brands={brands.data ?? []} packages={pkgs.data ?? []}
-        requests={(reqs.data as BookingRequest[]) ?? []} requestsReady={requestsReady} error={error} />
+        requests={(reqs.data as BookingRequest[]) ?? []} requestsReady={requestsReady} error={error} userId={user.id} />
     </div>
   );
 }

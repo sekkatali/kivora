@@ -51,14 +51,14 @@ export function DashNav<T extends string>({ items, tab, onChange, label }: { ite
   );
 }
 
-/** Barre d'avancement d'une demande. */
+/** Barre d'avancement d'une réservation. */
 export function RequestSteps({ status }: { status: string }) {
-  if (status === 'annulee') return <span className="tag bad">Annulée</span>;
-  const i = STATUS_FLOW.indexOf(status as (typeof STATUS_FLOW)[number]);
+  if (status === 'annulee' || status === 'refusee') return <span className="tag bad">{STATUS_LABEL[status]}</span>;
+  const pos = status === 'revision' ? 'livree' : status;
+  const i = STATUS_FLOW.indexOf(pos as (typeof STATUS_FLOW)[number]);
   return (
     <ol className="rq-steps" aria-label={`Statut : ${STATUS_LABEL[status] || status}`}>
-      {STATUS_FLOW.map((s, k) => <li key={s} className={k < i ? 'done' : k === i ? 'now' : ''}><i /><span>{STATUS_LABEL[s].replace('Demande envoyée', 'Envoyée')}</span></li>)}
+      {STATUS_FLOW.map((s, k) => <li key={s} className={k < i ? 'done' : k === i ? 'now' : ''}><i /><span>{k === i && status === 'revision' ? 'Révision' : STATUS_LABEL[s]}</span></li>)}
     </ol>
   );
 }
-

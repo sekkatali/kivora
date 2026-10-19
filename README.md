@@ -14,11 +14,18 @@ Pendant la préinscription :
 
 Pour ouvrir le site aux marques : ajoute `NEXT_PUBLIC_LAUNCH_MODE=off` dans Vercel, puis redéploie.
 
-## Demandes de réservation (à appliquer une fois)
+## Réservations entre marques et créateurs (à appliquer une fois)
 
-L'espace marque permet de demander une vidéo : prix du créateur, options, brief. L'admin suit chaque demande (onglet Demandes) de « Demande envoyée » à « Validée » ; la marque voit l'avancement, et le créateur voit la réservation dès qu'elle est confirmée.
+Le parcours se fait directement entre la marque et le créateur :
+1. la marque envoie une demande (prix, options, brief) ;
+2. le créateur l'accepte ou la refuse ;
+3. Kivora encaisse le paiement (l'admin marque « payée » tant que le paiement en ligne n'existe pas) ;
+4. le créateur livre le lien de la vidéo ;
+5. la marque valide, ou demande une révision (deux au maximum).
 
-Ces demandes ont besoin d'une table : colle le contenu de `supabase/migrations/09_booking_requests.sql` dans Supabase › SQL Editor › Run. Tant que ce n'est pas fait, les demandes passent par WhatsApp (variable `NEXT_PUBLIC_WHATSAPP`).
+Chaque réservation a sa conversation. L'admin supervise tout dans l'onglet Réservations et peut intervenir (statut, note visible des deux parties) en cas de litige. Les règles sont appliquées par la base : chacun ne peut faire que ses propres étapes, et le prix ne peut pas être modifié.
+
+À faire une fois : coller `supabase/migrations/09_booking_requests.sql` dans Supabase › SQL Editor › Run. Tant que ce n'est pas fait, les demandes des marques passent par WhatsApp (variable `NEXT_PUBLIC_WHATSAPP`).
 
 ## Ce qu'il y a dedans
 

@@ -4,8 +4,8 @@ import { createClient } from '@/lib/supabase/client';
 import { CITIES, NICHES, LANGUAGES, frError, dh, initials, WHATSAPP } from '@/lib/data';
 import { cleanHandle, cleanPhone, phoneOk } from './CreatorSignup';
 import { OPTIONS } from '@/lib/i18n';
-import { RequestSteps } from './DashNav';
-import { STATUS_LABEL, type BookingRequest } from '@/lib/booking';
+import BookingCard from './BookingCard';
+import { STATUS_LABEL, needsAction, type BookingRequest } from '@/lib/booking';
 
 type Creator = {
   id: string; first_name: string; last_name: string; phone: string | null; city: string | null; languages: string[]; niches: string[];
@@ -15,17 +15,18 @@ type Creator = {
 };
 type Pkg = { id: string; title: string; description: string | null; price_mad: number; active: boolean; archived?: boolean; position: number; option_key: string | null };
 type O = { on: boolean; price: string };
-type Tab = 'accueil' | 'offre' | 'profil' | 'paiement' | 'parrainage' | 'compte';
+type Tab = 'accueil' | 'reservations' | 'offre' | 'profil' | 'paiement' | 'parrainage' | 'compte';
 
 const ICON: Record<Tab, React.ReactNode> = {
   accueil: <path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" />,
+  reservations: <><path d="M4 13l2.5-7h11L20 13v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" /><path d="M4 13h4.5l1.5 2.5h4l1.5-2.5H20" /></>,
   offre: <><path d="M3 12V4h8l10 10-8 8z" /><circle cx="8" cy="9" r="1.4" /></>,
   profil: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5" /></>,
   paiement: <><rect x="3" y="6" width="18" height="12" rx="2.5" /><path d="M3 10h18" /></>,
   parrainage: <><circle cx="8" cy="9" r="3" /><circle cx="17" cy="10" r="2.5" /><path d="M2.5 19c.8-3 3-4.5 5.5-4.5s4.7 1.5 5.5 4.5M14 15.2c2.6-.5 5 .8 6 3.8" /></>,
   compte: <><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></>,
 };
-const TABS: [Tab, string][] = [['accueil', 'Accueil'], ['offre', 'Mon offre'], ['profil', 'Profil'], ['paiement', 'Paiement'], ['parrainage', 'Parrainage'], ['compte', 'Compte']];
+const TABS: [Tab, string][] = [['accueil', 'Accueil'], ['reservations', 'Réservations'], ['offre', 'Mon offre'], ['profil', 'Profil'], ['paiement', 'Paiement'], ['parrainage', 'Parrainage'], ['compte', 'Compte']];
 
 const STATUS = {
   pending: { ic: '…', t: 'Profil en cours de vérification', d: 'L’équipe regarde tes vidéos et tes réseaux. Un profil complet passe plus vite.' },
@@ -74,6 +75,8 @@ export default function CreatorDashboard({ creator, packages, referrals, email, 
   const [origin, setOrigin] = useState('');
   const [pw, setPw] = useState('');
   const [pwMsg, setPwMsg] = useState('');
+  const [bk, setBk] = useState<BookingRequest[]>(bookings);
+  const toDo = bk.filter((r) => needsAction(r, 'creator')).length;
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -204,7 +207,7 @@ export default function CreatorDashboard({ creator, packages, referrals, email, 
       <nav className="cd-nav" role="tablist" aria-label="Espace créateur">
         {TABS.map(([t, l]) => (
           <button key={t} role="tab" aria-selected={tab === t} aria-controls="cd-panel" onClick={() => setTab(t)}>
-            <Icon tab={t} /><span>{l}</span>{dirtyTab[t] ? <i className="dot" title="Modifications non enregistrées" /> : null}
+            <Icon tab={t} /><span>{l}</span>{t === 'reservations' && toDo ? <b className="nb">{toDo}</b> : dirtyTab[t] ? <i className="dot" title="Modifications non enregistrées" /> : null}
           </button>
         ))}
       </nav>
@@ -218,7 +221,7 @@ export default function CreatorDashboard({ creator, packages, referrals, email, 
             <button className="hi" onClick={() => setTab('offre')}><b>{c.desired_rate ? dh(c.desired_rate) : '—'}</b><span>ton prix · {onOpts.length} option{onOpts.length > 1 ? 's' : ''}</span></button>
             <button onClick={() => setTab('profil')}><b>{score} %</b><span>profil complet</span></button>
             <button onClick={() => setTab('parrainage')}><b>{referrals}</b><span>créateur{referrals > 1 ? 's' : ''} parrainé{referrals > 1 ? 's' : ''}</span></button>
-            <div><b>{bookings.filter((r) => r.status !== 'annulee').length}</b><span>réservation{bookings.length > 1 ? 's' : ''}</span></div>
+            <button onClick={() => setTab('reservations')}><b>{bk.filter((r) => !['annulee', 'refusee'].includes(r.status)).length}</b><span>réservation{bk.length > 1 ? 's' : ''}{toDo ? ` · ${toDo} à traiter` : ''}</span></button>
           </div>
           <div className="cols">
             <section className="panel" aria-labelledby="h-todo">
@@ -232,19 +235,24 @@ export default function CreatorDashboard({ creator, packages, referrals, email, 
             </section>
             <section className="panel" aria-labelledby="h-res">
               <h2 id="h-res">Tes réservations</h2>
-              {bookings.length === 0 ? <p className="empty-s">Aucune réservation pour l’instant. Les marques arrivent dès que le catalogue est complet dans ta niche ; on te prévient sur WhatsApp à chaque réservation.</p>
-                : bookings.map((r) => (
-                  <div className="rq" key={r.id} style={{ background: 'var(--ui-surface)' }}>
-                    <div className="rq-h"><div><b>{r.brand_company || 'Une marque'}</b><span>{STATUS_LABEL[r.status]} · {new Date(r.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span></div><span className="amt">{dh(r.total_mad)}</span></div>
-                    <RequestSteps status={r.status} />
-                    {r.options?.length ? <div className="rq-opts">{r.options.map((o) => <span key={o.key} style={{ background: '#fff' }}>{o.title}</span>)}</div> : null}
-                    {r.brief ? <details><summary className="small muted" style={{ cursor: 'pointer' }}>Le brief</summary><p className="small" style={{ whiteSpace: 'pre-line', marginTop: 6 }}>{r.brief}</p></details> : null}
-                  </div>
-                ))}
+              {bk.length === 0 ? <p className="empty-s">Aucune réservation pour l’instant. Les marques arrivent dès que le catalogue est complet dans ta niche ; tu verras ici chaque demande à accepter.</p>
+                : <div className="todo">{bk.slice(0, 3).map((r) => (
+                  <button key={r.id} className={needsAction(r, 'creator') ? '' : 'ok'} onClick={() => setTab('reservations')}>
+                    <i aria-hidden="true" /><span>{r.brand_company} · {STATUS_LABEL[r.status]} · {dh(r.total_mad)}</span><em>{needsAction(r, 'creator') ? 'À traiter →' : 'Voir →'}</em>
+                  </button>))}</div>}
               <h2 style={{ marginTop: 6 }}>Ta fiche</h2>
               <Fiche c={c} price={price} opts={opts} />
             </section>
           </div>
+        </>)}
+
+        {tab === 'reservations' && (<>
+          <div className="apphead"><h1>Réservations</h1><p>Les demandes des marques : accepte ou refuse, livre ta vidéo et échange avec la marque dans la conversation.</p></div>
+          {bk.length === 0 ? <p className="empty">Aucune demande pour l’instant. Dès qu’une marque te choisit, la demande apparaît ici et on te prévient sur WhatsApp.</p>
+            : [...bk].sort((x, y) => Number(needsAction(y, 'creator')) - Number(needsAction(x, 'creator'))).map((r) => (
+              <BookingCard key={r.id} r={r} role="creator" userId={c.id} supabase={supabase} say={say} onChange={(n) => setBk((l) => l.map((x) => (x.id === n.id ? n : x)))} />
+            ))}
+          <p className="small muted">Tu es payé par virement après la validation de la marque. Le paiement passe toujours par Kivora.</p>
         </>)}
 
         {tab === 'offre' && (<>
