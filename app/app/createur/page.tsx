@@ -20,7 +20,7 @@ export default async function CreatorPage() {
     <div className="appmode">
       <AppBar label="Créateur" email={user.email} />
       {creator ? (
-        <CreatorDashboard creator={creator} packages={packages ?? []} referrals={typeof refs === 'number' ? refs : 0} />
+        <CreatorDashboard creator={creator} packages={packages ?? []} referrals={typeof refs === "number" ? refs : 0} email={user.email} />
       ) : (
         <main className="appwrap"><p className="empty">Ton profil est introuvable. Écris-nous, on règle ça tout de suite.</p></main>
       )}
