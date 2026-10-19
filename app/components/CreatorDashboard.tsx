@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/client';
 import { CITIES, NICHES, LANGUAGES, frError, dh, initials, WHATSAPP } from '@/lib/data';
 import { cleanHandle, cleanPhone, phoneOk } from './CreatorSignup';
 import { OPTIONS } from '@/lib/i18n';
+import { RequestSteps } from './DashNav';
+import { STATUS_LABEL, type BookingRequest } from '@/lib/booking';
 
 type Creator = {
   id: string; first_name: string; last_name: string; phone: string | null; city: string | null; languages: string[]; niches: string[];
@@ -59,7 +61,7 @@ function Fiche({ c, price, opts }: { c: Creator; price: string; opts: Record<str
   );
 }
 
-export default function CreatorDashboard({ creator, packages, referrals, email }: { creator: Creator; packages: Pkg[]; referrals: number; email?: string | null }) {
+export default function CreatorDashboard({ creator, packages, referrals, email, bookings = [] }: { creator: Creator; packages: Pkg[]; referrals: number; email?: string | null; bookings?: BookingRequest[] }) {
   const supabase = useMemo(() => createClient(), []);
   const [tab, setTabState] = useState<Tab>('accueil');
   const [c, setC] = useState(creator);
@@ -216,7 +218,7 @@ export default function CreatorDashboard({ creator, packages, referrals, email }
             <button className="hi" onClick={() => setTab('offre')}><b>{c.desired_rate ? dh(c.desired_rate) : '—'}</b><span>ton prix · {onOpts.length} option{onOpts.length > 1 ? 's' : ''}</span></button>
             <button onClick={() => setTab('profil')}><b>{score} %</b><span>profil complet</span></button>
             <button onClick={() => setTab('parrainage')}><b>{referrals}</b><span>créateur{referrals > 1 ? 's' : ''} parrainé{referrals > 1 ? 's' : ''}</span></button>
-            <div><b>0</b><span>réservation</span></div>
+            <div><b>{bookings.filter((r) => r.status !== 'annulee').length}</b><span>réservation{bookings.length > 1 ? 's' : ''}</span></div>
           </div>
           <div className="cols">
             <section className="panel" aria-labelledby="h-todo">
@@ -230,7 +232,15 @@ export default function CreatorDashboard({ creator, packages, referrals, email }
             </section>
             <section className="panel" aria-labelledby="h-res">
               <h2 id="h-res">Tes réservations</h2>
-              <p className="empty-s">Aucune réservation pour l’instant. Les marques arrivent dès que le catalogue est complet dans ta niche ; on te prévient sur WhatsApp à chaque réservation.</p>
+              {bookings.length === 0 ? <p className="empty-s">Aucune réservation pour l’instant. Les marques arrivent dès que le catalogue est complet dans ta niche ; on te prévient sur WhatsApp à chaque réservation.</p>
+                : bookings.map((r) => (
+                  <div className="rq" key={r.id} style={{ background: 'var(--ui-surface)' }}>
+                    <div className="rq-h"><div><b>{r.brand_company || 'Une marque'}</b><span>{STATUS_LABEL[r.status]} · {new Date(r.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span></div><span className="amt">{dh(r.total_mad)}</span></div>
+                    <RequestSteps status={r.status} />
+                    {r.options?.length ? <div className="rq-opts">{r.options.map((o) => <span key={o.key} style={{ background: '#fff' }}>{o.title}</span>)}</div> : null}
+                    {r.brief ? <details><summary className="small muted" style={{ cursor: 'pointer' }}>Le brief</summary><p className="small" style={{ whiteSpace: 'pre-line', marginTop: 6 }}>{r.brief}</p></details> : null}
+                  </div>
+                ))}
               <h2 style={{ marginTop: 6 }}>Ta fiche</h2>
               <Fiche c={c} price={price} opts={opts} />
             </section>

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { dh, frError } from '@/lib/data';
+import { DashNav, useHashTab, RequestSteps, type NavItem } from './DashNav';
+import { STATUS_FLOW, STATUS_LABEL, type BookingRequest } from '@/lib/booking';
 
 const AE_SHORT: Record<string, string> = { oui: 'Oui', en_cours: 'En cours', non: 'Non' };
 
@@ -19,13 +21,18 @@ type Brand = {
 };
 type Pkg = { creator_id: string; title: string; price_mad: number; active: boolean; option_key: string | null };
 type Stats = Record<string, number | Record<string, number>>;
+type Tab = 'apercu' | 'createurs' | 'marques' | 'demandes';
+const TABS = ['apercu', 'createurs', 'marques', 'demandes'] as const;
 
-/* Palier P1 du plan de lancement */
-const GATE = { approved: 100, perNiche: 15, niches: 4, perCity: 15, cities: 3, aePct: 30, cpl: 20 };
+/* Paliers du plan de lancement */
+const P1 = { approved: 100, perNiche: 15, niches: 4, perCity: 15, cities: 3, aePct: 30, cpl: 20 };
+const P2 = { brands: 20, videos: 40, validatedPct: 80, reorderPct: 40, cac: 1000 };
+const PAID = ['payee', 'en_tournage', 'livree', 'validee'];
 const ST_LABEL = { pending: 'À vérifier', approved: 'Vérifié', rejected: 'Refusé' } as const;
 const ST_TAG = { pending: 'warn', approved: 'good', rejected: 'bad' } as const;
 const fmtDate = (s: string) => new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
-const wa = (p: string | null) => (p ? `https://wa.me/${p.replace(/^0/, '212').replace(/^\+/, '').replace(/^00/, '')}` : '');
+const wa = (p: string | null, text?: string) => (p ? `https://wa.me/${p.replace(/^\+/, '').replace(/^00/, '').replace(/^0/, '212')}${text ? `?text=${encodeURIComponent(text)}` : ''}` : '');
+const fr1 = (n: number) => n.toFixed(1).replace('.', ',');
 
 function csv(rows: Record<string, unknown>[], name: string) {
   if (!rows.length) return;
@@ -37,21 +44,36 @@ function csv(rows: Record<string, unknown>[], name: string) {
   a.download = `${name}-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
 }
 
-export default function AdminDashboard({ stats, creators, brands, packages, error }: { stats: Stats; creators: Creator[]; brands: Brand[]; packages: Pkg[]; error: string }) {
+function Gate({ l, v, t, txt }: { l: string; v: number; t: number; txt: string }) {
+  const ok = v >= t;
+  return (
+    <div className="gate"><div className="l"><b>{l}</b><span>{txt}{ok ? ' ✓' : ''}</span></div>
+      <div className="meter" title={txt}><i style={{ width: `${Math.min(100, t ? (v / t) * 100 : 0)}%`, background: ok ? 'var(--good)' : undefined }} /></div></div>
+  );
+}
+
+export default function AdminDashboard({ stats, creators, brands, packages, requests = [], requestsReady = true, error }: {
+  stats: Stats; creators: Creator[]; brands: Brand[]; packages: Pkg[]; requests?: BookingRequest[]; requestsReady?: boolean; error: string;
+}) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const [tab, setTab] = useHashTab<Tab>(TABS, 'apercu');
   const [cr, setCr] = useState(creators);
   const [br, setBr] = useState(brands);
-  const [tab, setTab] = useState<'creators' | 'brands'>('creators');
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [rq, setRq] = useState(requests);
+  const [cFilter, setCFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [bFilter, setBFilter] = useState<'all' | 'waitlist' | 'active'>('all');
+  const [rFilter, setRFilter] = useState<'ouvertes' | 'toutes' | string>('ouvertes');
   const [q, setQ] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [toast, setToast] = useState(error ? `Erreur : ${error}` : '');
   const [spend, setSpend] = useState('');
+  const [spendB, setSpendB] = useState('');
 
-  useEffect(() => { try { setSpend(localStorage.getItem('kivora-spend') || ''); } catch { /* rien */ } }, []);
-  useEffect(() => { try { localStorage.setItem('kivora-spend', spend); } catch { /* rien */ } }, [spend]);
+  useEffect(() => { try { setSpend(localStorage.getItem('kivora-spend') || ''); setSpendB(localStorage.getItem('kivora-spend-brands') || ''); } catch { /* rien */ } }, []);
+  useEffect(() => { try { localStorage.setItem('kivora-spend', spend); localStorage.setItem('kivora-spend-brands', spendB); } catch { /* rien */ } }, [spend, spendB]);
+  useEffect(() => { setQ(''); setOpen(null); }, [tab]);
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2600); };
 
   const pkBy = useMemo(() => {
@@ -59,37 +81,62 @@ export default function AdminDashboard({ stats, creators, brands, packages, erro
     packages.forEach((p) => { (m[p.creator_id] ||= []).push(p); });
     return m;
   }, [packages]);
+  const brandById = useMemo(() => Object.fromEntries(br.map((b) => [b.id, b])), [br]);
+  const creatorById = useMemo(() => Object.fromEntries(cr.map((c) => [c.id, c])), [cr]);
 
-  /* Indicateurs calculés sur la liste à jour */
+  /* ---------- indicateurs palier 1 ---------- */
   const approved = cr.filter((c) => c.status === 'approved');
+  const pending = cr.filter((c) => c.status === 'pending').length;
   const count = (list: Creator[], key: 'niches' | 'city') => {
     const m: Record<string, number> = {};
-    list.forEach((c) => { const vals = key === 'niches' ? c.niches : [c.city || 'Non renseignée']; vals.forEach((v) => { m[v] = (m[v] || 0) + 1; }); });
+    list.forEach((c) => { (key === 'niches' ? c.niches : [c.city || 'Non renseignée']).forEach((v) => { m[v] = (m[v] || 0) + 1; }); });
     return Object.entries(m).sort((a, b) => b[1] - a[1]);
   };
   const nicheA = count(approved, 'niches');
   const cityA = count(approved, 'city');
   const aePct = approved.length ? Math.round((approved.filter((c) => c.ae_status === 'oui' || c.ae_status === 'en_cours').length / approved.length) * 100) : 0;
   const complete = cr.filter((c) => c.portfolio_url && c.desired_rate).length;
-  const paid = cr.filter((c) => /meta|facebook|instagram|fb|ig/i.test(c.utm?.utm_source || '')).length;
-  const cpl = Number(spend) > 0 && paid ? Number(spend) / paid : null;
-  const gates = [
-    { l: 'Créateurs vérifiés', v: approved.length, t: GATE.approved, txt: `${approved.length} / ${GATE.approved}` },
-    { l: `Niches à ${GATE.perNiche}+ vérifiés`, v: nicheA.filter((x) => x[1] >= GATE.perNiche).length, t: GATE.niches, txt: `${nicheA.filter((x) => x[1] >= GATE.perNiche).length} / ${GATE.niches}` },
-    { l: `Villes à ${GATE.perCity}+ vérifiés`, v: cityA.filter((x) => x[1] >= GATE.perCity).length, t: GATE.cities, txt: `${cityA.filter((x) => x[1] >= GATE.perCity).length} / ${GATE.cities}` },
-    { l: 'Vérifiés auto-entrepreneurs ou en cours', v: aePct, t: GATE.aePct, txt: `${aePct} % (objectif ${GATE.aePct} %)` },
+  const fromMeta = cr.filter((c) => /meta|facebook|instagram|fb|ig/i.test(c.utm?.utm_source || '')).length;
+  const cpl = Number(spend) > 0 && fromMeta ? Number(spend) / fromMeta : null;
+  const p1 = [
+    { l: 'Créateurs vérifiés', v: approved.length, t: P1.approved, txt: `${approved.length} / ${P1.approved}` },
+    { l: `Niches à ${P1.perNiche}+ vérifiés`, v: nicheA.filter((x) => x[1] >= P1.perNiche).length, t: P1.niches, txt: `${nicheA.filter((x) => x[1] >= P1.perNiche).length} / ${P1.niches}` },
+    { l: `Villes à ${P1.perCity}+ vérifiés`, v: cityA.filter((x) => x[1] >= P1.perCity).length, t: P1.cities, txt: `${cityA.filter((x) => x[1] >= P1.perCity).length} / ${P1.cities}` },
+    { l: 'Vérifiés auto-entrepreneurs ou en cours', v: aePct, t: P1.aePct, txt: `${aePct} % (objectif ${P1.aePct} %)` },
   ];
+  const p1ok = p1.every((g) => g.v >= g.t) && cpl != null && cpl < P1.cpl;
 
+  /* ---------- indicateurs palier 2 ---------- */
+  const paidReq = rq.filter((r) => PAID.includes(r.status));
+  const payingBrands = new Set(paidReq.map((r) => r.brand_id));
+  const delivered = rq.filter((r) => ['livree', 'validee'].includes(r.status));
+  const validated = rq.filter((r) => r.status === 'validee');
+  const validatedPct = delivered.length ? Math.round((validated.length / delivered.length) * 100) : 0;
+  const perBrand: Record<string, number> = {};
+  paidReq.forEach((r) => { perBrand[r.brand_id] = (perBrand[r.brand_id] || 0) + 1; });
+  const reorderPct = payingBrands.size ? Math.round((Object.values(perBrand).filter((n) => n >= 2).length / payingBrands.size) * 100) : 0;
+  const cac = Number(spendB) > 0 && payingBrands.size ? Number(spendB) / payingBrands.size : null;
+  const p2 = [
+    { l: 'Marques payantes', v: payingBrands.size, t: P2.brands, txt: `${payingBrands.size} / ${P2.brands}` },
+    { l: 'Vidéos livrées', v: delivered.length, t: P2.videos, txt: `${delivered.length} / ${P2.videos}` },
+    { l: 'Vidéos validées (sur livrées)', v: validatedPct, t: P2.validatedPct, txt: `${validatedPct} % (objectif ${P2.validatedPct} %)` },
+    { l: 'Marques qui recommandent', v: reorderPct, t: P2.reorderPct, txt: `${reorderPct} % (objectif ${P2.reorderPct} %)` },
+  ];
+  const gmv = paidReq.reduce((a, r) => a + (r.total_mad || 0), 0);
+  const openReq = rq.filter((r) => !['validee', 'annulee'].includes(r.status));
+  const newReq = rq.filter((r) => r.status === 'nouvelle').length;
+
+  /* ---------- graphiques ---------- */
   const byDay = (stats.by_day || {}) as Record<string, number>;
   const days = Array.from({ length: 30 }, (_, i) => { const d = new Date(Date.now() - (29 - i) * 864e5); const k = d.toLocaleDateString('sv-SE', { timeZone: 'Africa/Casablanca' }); return [k, byDay[k] || 0] as const; });
   const dayMax = Math.max(1, ...days.map((d) => d[1]));
+  const last7 = days.slice(-7).reduce((a, d) => a + d[1], 0);
   const sources = Object.entries((stats.by_source || {}) as Record<string, number>).sort((a, b) => b[1] - a[1]);
+  const langs: Record<string, number> = {};
+  cr.forEach((c) => { const l = c.utm?.lang === 'dr' ? 'Darija' : 'Français'; langs[l] = (langs[l] || 0) + 1; });
 
-  const ql = q.trim().toLowerCase();
-  const rows = cr.filter((c) => (filter === 'all' || c.status === filter) && (!ql || `${c.first_name} ${c.last_name} ${c.city} ${c.profiles?.email} ${c.instagram} ${c.tiktok} ${c.niches.join(' ')}`.toLowerCase().includes(ql)));
-  const brows = br.filter((b) => !ql || `${b.company} ${b.contact_name} ${b.profiles?.email} ${b.sector}`.toLowerCase().includes(ql));
-
-  async function setStatus(c: Creator, status: Creator['status']) {
+  /* ---------- actions ---------- */
+  async function setCreator(c: Creator, status: Creator['status']) {
     const { error: e } = await supabase.from('creators').update({ status, admin_note: note.trim() || null }).eq('id', c.id);
     if (e) return say(frError(e.message));
     setCr((l) => l.map((x) => (x.id === c.id ? { ...x, status, admin_note: note.trim() || null, reviewed_at: new Date().toISOString() } : x)));
@@ -102,145 +149,234 @@ export default function AdminDashboard({ stats, creators, brands, packages, erro
     setBr((l) => l.map((x) => (x.id === b.id ? { ...x, status } : x)));
     say(status === 'active' ? `${b.company} a accès au catalogue` : `${b.company} remis en liste d’attente`);
   }
+  async function setRequest(r: BookingRequest, patch: Partial<BookingRequest>) {
+    const { data, error: e } = await supabase.from('booking_requests').update(patch).eq('id', r.id).select().single();
+    if (e) return say(frError(e.message));
+    setRq((l) => l.map((x) => (x.id === r.id ? (data as BookingRequest) : x)));
+    say(patch.status ? `Demande : ${STATUS_LABEL[patch.status]}` : 'Note enregistrée');
+  }
+
+  const ql = q.trim().toLowerCase();
+  const cRows = cr.filter((c) => (cFilter === 'all' || c.status === cFilter) && (!ql || `${c.first_name} ${c.last_name} ${c.city} ${c.profiles?.email} ${c.instagram} ${c.tiktok} ${c.niches.join(' ')}`.toLowerCase().includes(ql)));
+  const bRows = br.filter((b) => (bFilter === 'all' || b.status === bFilter) && (!ql || `${b.company} ${b.contact_name} ${b.profiles?.email} ${b.sector}`.toLowerCase().includes(ql)));
+  const rRows = rq.filter((r) => (rFilter === 'toutes' || (rFilter === 'ouvertes' ? !['validee', 'annulee'].includes(r.status) : r.status === rFilter))
+    && (!ql || `${r.brand_company} ${r.creator_label} ${r.brief}`.toLowerCase().includes(ql)));
+  const reqCount = (bid: string) => rq.filter((r) => r.brand_id === bid).length;
+
   const exportCreators = () => csv(cr.map((c) => ({
     prenom: c.first_name, nom: c.last_name, email: c.profiles?.email, whatsapp: c.phone, ville: c.city, niches: c.niches, langues: c.languages,
-    instagram: c.instagram, tiktok: c.tiktok, abonnes: c.followers, portfolio: c.portfolio_url, tarif_souhaite: c.desired_rate,
+    instagram: c.instagram, tiktok: c.tiktok, abonnes: c.followers, portfolio: c.portfolio_url, prix: c.desired_rate,
+    options: (pkBy[c.id] || []).filter((p) => p.option_key && p.active).map((p) => `${p.title} +${p.price_mad}`),
     auto_entrepreneur: c.ae_status, statut: c.status, parrain: c.referred_by, code: c.referral_code,
-    source: c.utm?.utm_source, campagne: c.utm?.utm_campaign, annonce: c.utm?.utm_content, inscrit_le: c.created_at,
+    source: c.utm?.utm_source, campagne: c.utm?.utm_campaign, annonce: c.utm?.utm_content, langue: c.utm?.lang || 'fr', inscrit_le: c.created_at,
   })), 'kivora-createurs');
   const exportBrands = () => csv(br.map((b) => ({
     marque: b.company, contact: b.contact_name, email: b.profiles?.email, telephone: b.phone, site: b.website, ice: b.ice, secteur: b.sector,
-    budget: b.monthly_budget, statut: b.status, source: b.utm?.utm_source, campagne: b.utm?.utm_campaign, inscrit_le: b.created_at,
+    budget: b.monthly_budget, statut: b.status, demandes: reqCount(b.id), source: b.utm?.utm_source, campagne: b.utm?.utm_campaign, inscrit_le: b.created_at,
   })), 'kivora-marques');
+  const exportRequests = () => csv(rq.map((r) => ({
+    date: r.created_at, marque: r.brand_company, createur: r.creator_label, prix_createur: r.base_price, options: (r.options || []).map((o) => `${o.title} +${o.price_mad}`),
+    total_createur: r.total_mad, statut: STATUS_LABEL[r.status], brief: r.brief, note: r.admin_note,
+  })), 'kivora-demandes');
 
-  const pending = cr.filter((c) => c.status === 'pending').length;
+  const nav: NavItem<Tab>[] = [
+    { id: 'apercu', label: 'Vue d’ensemble', icon: 'chart' },
+    { id: 'createurs', label: 'Créateurs', icon: 'users', badge: pending || undefined },
+    { id: 'marques', label: 'Marques', icon: 'building', badge: br.filter((b) => b.status === 'waitlist').length || undefined },
+    { id: 'demandes', label: 'Demandes', icon: 'inbox', badge: newReq || undefined },
+  ];
+
   return (
-    <main className="appwrap">
-      <div className="apphead"><h1>Tableau de bord</h1><p>Préinscriptions, vérification des créateurs et accès des marques.</p></div>
+    <div className="cd">
+      <DashNav items={nav} tab={tab} onChange={setTab} label="Administration" />
+      <main className="cd-main" id="cd-panel" role="tabpanel">
 
-      {pending > 0 ? (
-        <a className="status pending" href="#liste" onClick={() => { setTab('creators'); setFilter('pending'); }} style={{ textDecoration: 'none' }}>
-          <span className="ic" aria-hidden="true">{pending}</span>
-          <div><b>{pending} créateur{pending > 1 ? 's' : ''} à vérifier</b><p>Ouvre la liste, clique sur « Examiner », regarde ses vidéos puis « Vérifier » ou « Refuser ».</p></div>
-        </a>
-      ) : null}
-
-      <div className="tiles">
-        <div className="hi"><b>{cr.length}</b><span>créateurs préinscrits</span></div>
-        <div><b>{complete}</b><span>profils complets (vidéos + prix)</span></div>
-        <div><b>{approved.length}</b><span>vérifiés · {pending} à vérifier</span></div>
-        <div><b>{br.length}</b><span>marques · {br.filter((b) => b.status === 'active').length} actives</span></div>
-      </div>
-
-      <div className="cols">
-        <section className="panel" aria-labelledby="h-gate">
-          <div className="ph"><h2 id="h-gate">Palier 1 : ouvrir aux marques</h2><span className={`tag ${gates.every((g) => g.v >= g.t) ? 'good' : 'warn'}`}>{gates.every((g) => g.v >= g.t) ? '✓ Prêt' : 'En cours'}</span></div>
-          <div className="gates">
-            {gates.map((g) => (
-              <div className="gate" key={g.l}><div className="l"><b>{g.l}</b><span>{g.txt}{g.v >= g.t ? ' ✓' : ''}</span></div>
-                <div className="meter" title={g.txt}><i style={{ width: `${Math.min(100, (g.v / g.t) * 100)}%`, background: g.v >= g.t ? 'var(--good)' : undefined }} /></div></div>
-            ))}
-            <div className="gate"><div className="l"><b>Coût par préinscrit Meta</b><span>{cpl == null ? '—' : `${cpl.toFixed(1).replace('.', ',')} DH${cpl < GATE.cpl ? ' ✓' : ''}`} (objectif &lt; {GATE.cpl} DH)</span></div>
-              <label className="toolbar small">Dépense pub cumulée <input style={{ width: 120, background: 'var(--ui-surface)' }} type="number" inputMode="numeric" value={spend} onChange={(e) => setSpend(e.target.value)} placeholder="DH" /> pour {paid} préinscrits venus de Meta</label></div>
+        {tab === 'apercu' && (<>
+          <div className="apphead"><h1>Vue d’ensemble</h1><p>Où en sont les paliers, et ce qui attend une action.</p></div>
+          {(pending > 0 || newReq > 0) ? (
+            <div className="todo">
+              {pending > 0 ? <button onClick={() => { setCFilter('pending'); setTab('createurs'); }}><i aria-hidden="true" /><span><b>{pending}</b> créateur{pending > 1 ? 's' : ''} à vérifier</span><em>Ouvrir →</em></button> : null}
+              {newReq > 0 ? <button onClick={() => { setRFilter('nouvelle'); setTab('demandes'); }}><i aria-hidden="true" /><span><b>{newReq}</b> nouvelle{newReq > 1 ? 's' : ''} demande{newReq > 1 ? 's' : ''} de réservation</span><em>Ouvrir →</em></button> : null}
+            </div>
+          ) : null}
+          <div className="tiles">
+            <div className="hi"><b>{cr.length}</b><span>préinscrits · {last7} cette semaine</span></div>
+            <div><b>{approved.length}</b><span>vérifiés · {complete} profils complets</span></div>
+            <div><b>{br.length}</b><span>marques · {br.filter((b) => b.status === 'active').length} actives</span></div>
+            <div><b>{dh(gmv)}</b><span>réservé (prix créateurs)</span></div>
           </div>
-        </section>
-        <section className="panel" aria-labelledby="h-day">
-          <h2 id="h-day">Préinscriptions, 30 derniers jours</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(30,1fr)', gap: 2, alignItems: 'end', height: 120 }} role="img" aria-label="Préinscriptions par jour">
-            {days.map(([d, v]) => <span key={d} title={`${fmtDate(d)} : ${v}`} style={{ display: 'block', height: `${Math.max(v ? 6 : 2, (v / dayMax) * 120)}px`, background: v ? 'var(--forest)' : 'var(--ui-surface)', borderRadius: '4px 4px 0 0' }} />)}
+          <div className="cols">
+            <section className="panel" aria-labelledby="h-p1">
+              <div className="ph"><h2 id="h-p1">Palier 1 : créateurs</h2><span className={`tag ${p1ok ? 'good' : 'warn'}`}>{p1ok ? '✓ Atteint' : 'En cours'}</span></div>
+              <div className="gates">
+                {p1.map((g) => <Gate key={g.l} {...g} />)}
+                <div className="gate"><div className="l"><b>Coût par préinscrit Meta</b><span>{cpl == null ? '—' : `${fr1(cpl)} DH${cpl < P1.cpl ? ' ✓' : ''}`} (objectif &lt; {P1.cpl} DH)</span></div>
+                  <label className="toolbar small">Dépense pub créateurs <input style={{ width: 110, background: 'var(--ui-surface)' }} type="number" inputMode="numeric" value={spend} onChange={(e) => setSpend(e.target.value)} placeholder="DH" /> · {fromMeta} venus de Meta</label></div>
+              </div>
+            </section>
+            <section className="panel" aria-labelledby="h-p2">
+              <div className="ph"><h2 id="h-p2">Palier 2 : marques en conciergerie</h2><span className={`tag ${p2.every((g) => g.v >= g.t) ? 'good' : 'warn'}`}>{p2.every((g) => g.v >= g.t) ? '✓ Atteint' : requestsReady ? 'En cours' : 'Table à créer'}</span></div>
+              <div className="gates">
+                {p2.map((g) => <Gate key={g.l} {...g} />)}
+                <div className="gate"><div className="l"><b>Coût d’acquisition par marque payante</b><span>{cac == null ? '—' : `${dh(cac)}${cac < P2.cac ? ' ✓' : ''}`} (objectif &lt; {dh(P2.cac)})</span></div>
+                  <label className="toolbar small">Dépense pub marques <input style={{ width: 110, background: 'var(--ui-surface)' }} type="number" inputMode="numeric" value={spendB} onChange={(e) => setSpendB(e.target.value)} placeholder="DH" /></label></div>
+              </div>
+            </section>
           </div>
-          <div className="l small" style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}><span>{fmtDate(days[0][0])}</span><span>max {dayMax} / jour</span><span>aujourd’hui</span></div>
-          <h2>Sources</h2>
-          <div className="dist">{sources.length ? sources.slice(0, 6).map(([s, v]) => (
-            <div key={s}><span>{s}</span><span className="meter"><i style={{ width: `${(v / Math.max(1, cr.length)) * 100}%` }} /></span><span>{v}</span></div>
-          )) : <p className="small" style={{ color: 'var(--muted)' }}>Aucune préinscription pour l’instant.</p>}</div>
-        </section>
-      </div>
-
-      <div className="cols">
-        <section className="panel" aria-labelledby="h-n"><h2 id="h-n">Vérifiés par niche</h2>
-          <div className="dist">{nicheA.length ? nicheA.slice(0, 8).map(([n, v]) => <div key={n}><span>{n}</span><span className="meter"><i className={v >= GATE.perNiche ? 'ok' : ''} style={{ width: `${Math.min(100, (v / GATE.perNiche) * 100)}%` }} /></span><span>{v}</span></div>) : <p className="small" style={{ color: 'var(--muted)' }}>Aucun créateur vérifié.</p>}</div></section>
-        <section className="panel" aria-labelledby="h-c"><h2 id="h-c">Vérifiés par ville</h2>
-          <div className="dist">{cityA.length ? cityA.slice(0, 8).map(([n, v]) => <div key={n}><span>{n}</span><span className="meter"><i className={v >= GATE.perCity ? 'ok' : ''} style={{ width: `${Math.min(100, (v / GATE.perCity) * 100)}%` }} /></span><span>{v}</span></div>) : <p className="small" style={{ color: 'var(--muted)' }}>Aucun créateur vérifié.</p>}</div></section>
-      </div>
-
-      <h2 id="liste" className="sec-h" style={{ fontSize: 26, scrollMarginTop: 16 }}>Vérification des créateurs et accès des marques</h2>
-      <div className="toolbar">
-        <div className="seg" role="group" aria-label="Liste">
-          <button aria-pressed={tab === 'creators'} onClick={() => setTab('creators')}>Créateurs ({cr.length})</button>
-          <button aria-pressed={tab === 'brands'} onClick={() => setTab('brands')}>Marques ({br.length})</button>
-        </div>
-        {tab === 'creators' ? (
-          <div className="seg" role="group" aria-label="Statut">
-            {(['pending', 'approved', 'rejected', 'all'] as const).map((s) => <button key={s} aria-pressed={filter === s} onClick={() => setFilter(s)}>{s === 'all' ? 'Tous' : ST_LABEL[s]}</button>)}
+          <div className="cols">
+            <section className="panel" aria-labelledby="h-day">
+              <h2 id="h-day">Préinscriptions, 30 derniers jours</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(30,1fr)', gap: 2, alignItems: 'end', height: 120 }} role="img" aria-label="Préinscriptions par jour">
+                {days.map(([d, v]) => <span key={d} title={`${fmtDate(d)} : ${v}`} style={{ display: 'block', height: `${Math.max(v ? 6 : 2, (v / dayMax) * 120)}px`, background: v ? 'var(--forest)' : 'var(--ui-surface)', borderRadius: '4px 4px 0 0' }} />)}
+              </div>
+              <div className="small muted" style={{ display: 'flex', justifyContent: 'space-between' }}><span>{fmtDate(days[0][0])}</span><span>max {dayMax} par jour</span><span>aujourd’hui</span></div>
+            </section>
+            <section className="panel" aria-labelledby="h-src">
+              <h2 id="h-src">Sources et langue</h2>
+              <div className="dist">{sources.length ? sources.slice(0, 5).map(([s, v]) => (
+                <div key={s}><span>{s}</span><span className="meter"><i style={{ width: `${(v / Math.max(1, cr.length)) * 100}%` }} /></span><span>{v}</span></div>
+              )) : <p className="small muted">Aucune préinscription pour l’instant.</p>}</div>
+              {cr.length ? <div className="dist">{Object.entries(langs).map(([l, v]) => <div key={l}><span>{l}</span><span className="meter"><i style={{ width: `${(v / cr.length) * 100}%` }} /></span><span>{v}</span></div>)}</div> : null}
+            </section>
           </div>
-        ) : null}
-        <input type="search" placeholder="Rechercher" value={q} onChange={(e) => setQ(e.target.value)} />
-        <button className="btn sm quiet" onClick={tab === 'creators' ? exportCreators : exportBrands}>Exporter en CSV</button>
-      </div>
+          <div className="cols">
+            <section className="panel" aria-labelledby="h-n"><h2 id="h-n">Vérifiés par niche</h2>
+              <div className="dist">{nicheA.length ? nicheA.slice(0, 8).map(([n, v]) => <div key={n}><span>{n}</span><span className="meter"><i className={v >= P1.perNiche ? 'ok' : ''} style={{ width: `${Math.min(100, (v / P1.perNiche) * 100)}%` }} /></span><span>{v}</span></div>) : <p className="small muted">Aucun créateur vérifié.</p>}</div></section>
+            <section className="panel" aria-labelledby="h-c"><h2 id="h-c">Vérifiés par ville</h2>
+              <div className="dist">{cityA.length ? cityA.slice(0, 8).map(([n, v]) => <div key={n}><span>{n}</span><span className="meter"><i className={v >= P1.perCity ? 'ok' : ''} style={{ width: `${Math.min(100, (v / P1.perCity) * 100)}%` }} /></span><span>{v}</span></div>) : <p className="small muted">Aucun créateur vérifié.</p>}</div></section>
+          </div>
+        </>)}
 
-      {tab === 'creators' ? (
-        rows.length === 0 ? <p className="empty">{cr.length === 0 ? 'Aucune préinscription pour l’instant. Dès qu’un créateur s’inscrit sur l’accueil, il apparaît ici avec le statut « À vérifier ».' : 'Aucun créateur dans cette liste.'}</p> : (
-          <div className="tbl"><table>
-            <thead><tr><th>Créateur</th><th>Ville</th><th>Niches</th><th>Réseaux</th><th>Prix</th><th>Auto-entr.</th><th>Statut</th><th>Inscrit</th><th /></tr></thead>
-            <tbody>{rows.map((c) => {
-              const isOpen = open === c.id;
-              return [
-                <tr key={c.id} className={isOpen ? 'open' : ''}>
-                  <td><button className="rowbtn" onClick={() => { setOpen(isOpen ? null : c.id); setNote(c.admin_note || ''); }} aria-expanded={isOpen}>{c.first_name} {c.last_name}</button><span className="sub">{c.profiles?.email}</span></td>
-                  <td>{c.city}</td>
-                  <td>{c.niches.join(', ')}</td>
-                  <td>{c.instagram ? <a className="link" href={`https://instagram.com/${c.instagram}`} target="_blank" rel="noopener nofollow">IG</a> : null} {c.tiktok ? <a className="link" href={`https://tiktok.com/@${c.tiktok}`} target="_blank" rel="noopener nofollow">TT</a> : null}<span className="sub">{c.followers ? `${c.followers.toLocaleString('fr-FR')} abonnés` : ''}</span></td>
-                  <td>{dh(c.desired_rate)}</td>
-                  <td>{c.ae_status ? AE_SHORT[c.ae_status] : '—'}</td>
-                  <td><span className={`tag ${ST_TAG[c.status]}`}>{ST_LABEL[c.status]}</span></td>
-                  <td>{fmtDate(c.created_at)}<span className="sub">{c.utm?.utm_source || 'direct'}</span></td>
-                  <td><button className={`btn sm ${isOpen ? 'quiet' : 'ink'}`} onClick={() => { setOpen(isOpen ? null : c.id); setNote(c.admin_note || ''); }}>{isOpen ? 'Fermer' : c.status === 'pending' ? 'Examiner' : 'Modifier'}</button></td>
-                </tr>,
-                isOpen ? (
-                  <tr key={c.id + '-d'} className="open"><td colSpan={9}>
-                    <dl className="detail">
-                      <div><dt>WhatsApp</dt><dd>{c.phone ? <a className="link" href={wa(c.phone)} target="_blank" rel="noopener">{c.phone}</a> : '—'}</dd></div>
-                      <div><dt>Langues</dt><dd>{c.languages.join(', ') || '—'}</dd></div>
-                      <div><dt>Portfolio</dt><dd>{c.portfolio_url ? <a className="link" href={c.portfolio_url} target="_blank" rel="noopener nofollow">Ouvrir</a> : '—'}</dd></div>
-                      <div><dt>Options</dt><dd>{(pkBy[c.id] || []).filter((p) => p.option_key && p.active).map((p) => `${p.title} +${dh(p.price_mad)}`).join(' · ') || 'Aucune'}</dd></div>
-                      <div><dt>Parrainé par</dt><dd>{c.referred_by || '—'} · code {c.referral_code}</dd></div>
-                      <div><dt>Campagne</dt><dd>{[c.utm?.utm_campaign, c.utm?.utm_content].filter(Boolean).join(' / ') || '—'}</dd></div>
-                      <div className="wide"><dt>Présentation</dt><dd>{c.bio || '—'}</dd></div>
-                      <label className="f wide"><span>Message au créateur <em>(visible dans son espace)</em></span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex. Ajoute 2 vidéos face caméra avec un meilleur son." /></label>
-                      <div className="wide toolbar">
-                        <button className="btn sm ink" onClick={() => setStatus(c, 'approved')}>Vérifier</button>
-                        <button className="btn sm quiet" onClick={() => setStatus(c, 'rejected')}>Refuser</button>
-                        {c.status !== 'pending' ? <button className="btn sm quiet" onClick={() => setStatus(c, 'pending')}>Remettre à vérifier</button> : null}
-                      </div>
-                    </dl>
-                  </td></tr>
-                ) : null,
-              ];
-            })}</tbody>
-          </table></div>
-        )
-      ) : (
-        brows.length === 0 ? <p className="empty">Aucune marque pour l’instant.</p> : (
-          <div className="tbl"><table>
-            <thead><tr><th>Marque</th><th>Contact</th><th>Secteur</th><th>Budget</th><th>Statut</th><th>Inscrite</th><th /></tr></thead>
-            <tbody>{brows.map((b) => (
-              <tr key={b.id}>
-                <td><b style={{ fontWeight: 500 }}>{b.company}</b><span className="sub">{b.website}</span></td>
-                <td>{b.contact_name}<span className="sub">{b.profiles?.email}</span><span className="sub">{b.phone ? <a className="link" href={wa(b.phone)} target="_blank" rel="noopener">{b.phone}</a> : null}</span></td>
-                <td>{b.sector}</td>
-                <td>{b.monthly_budget || '—'}</td>
-                <td><span className={`tag ${b.status === 'active' ? 'good' : 'warn'}`}>{b.status === 'active' ? 'Accès ouvert' : 'Liste d’attente'}</span></td>
-                <td>{fmtDate(b.created_at)}<span className="sub">{b.utm?.utm_source || 'direct'}</span></td>
-                <td>{b.status === 'active'
-                  ? <button className="btn sm quiet" onClick={() => setBrand(b, 'waitlist')}>Retirer l’accès</button>
-                  : <button className="btn sm ink" onClick={() => setBrand(b, 'active')}>Ouvrir l’accès</button>}</td>
-              </tr>
-            ))}</tbody>
-          </table></div>
-        )
-      )}
+        {tab === 'createurs' && (<>
+          <div className="apphead"><h1>Créateurs</h1><p>Examine chaque profil : vidéos, réseaux, prix. Le message que tu écris s’affiche dans son espace.</p></div>
+          <div className="toolbar">
+            <div className="seg" role="group" aria-label="Statut">
+              {(['pending', 'approved', 'rejected', 'all'] as const).map((s) => <button key={s} aria-pressed={cFilter === s} onClick={() => setCFilter(s)}>{s === 'all' ? `Tous (${cr.length})` : `${ST_LABEL[s]} (${cr.filter((c) => c.status === s).length})`}</button>)}
+            </div>
+            <input type="search" placeholder="Nom, ville, niche, e-mail…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <button className="btn sm quiet" onClick={exportCreators}>Exporter en CSV</button>
+          </div>
+          {cRows.length === 0 ? <p className="empty">{cr.length === 0 ? 'Aucune préinscription pour l’instant. Dès qu’un créateur s’inscrit, il apparaît ici avec le statut « À vérifier ».' : 'Aucun créateur dans cette liste.'}</p> : (
+            <div className="tbl"><table>
+              <thead><tr><th>Créateur</th><th>Ville</th><th>Niches</th><th>Réseaux</th><th>Prix</th><th>Auto-entr.</th><th>Statut</th><th>Inscrit</th><th /></tr></thead>
+              <tbody>{cRows.map((c) => {
+                const isOpen = open === c.id;
+                const toggle = () => { setOpen(isOpen ? null : c.id); setNote(c.admin_note || ''); };
+                return [
+                  <tr key={c.id} className={isOpen ? 'open' : ''}>
+                    <td><button className="rowbtn" onClick={toggle} aria-expanded={isOpen}>{c.first_name} {c.last_name}</button><span className="sub">{c.profiles?.email}</span></td>
+                    <td>{c.city}</td>
+                    <td>{c.niches.join(', ')}</td>
+                    <td>{c.instagram ? <a className="link" href={`https://instagram.com/${c.instagram}`} target="_blank" rel="noopener nofollow">IG</a> : null} {c.tiktok ? <a className="link" href={`https://tiktok.com/@${c.tiktok}`} target="_blank" rel="noopener nofollow">TT</a> : null}<span className="sub">{c.followers ? `${c.followers.toLocaleString('fr-FR')} abonnés` : ''}</span></td>
+                    <td>{dh(c.desired_rate)}<span className="sub">{(pkBy[c.id] || []).filter((p) => p.option_key && p.active).length} option(s)</span></td>
+                    <td>{c.ae_status ? AE_SHORT[c.ae_status] : '—'}</td>
+                    <td><span className={`tag ${ST_TAG[c.status]}`}>{ST_LABEL[c.status]}</span></td>
+                    <td>{fmtDate(c.created_at)}<span className="sub">{c.utm?.utm_source || 'direct'}{c.utm?.lang === 'dr' ? ' · darija' : ''}</span></td>
+                    <td><button className={`btn sm ${isOpen ? 'quiet' : 'ink'}`} onClick={toggle}>{isOpen ? 'Fermer' : c.status === 'pending' ? 'Examiner' : 'Modifier'}</button></td>
+                  </tr>,
+                  isOpen ? (
+                    <tr key={c.id + '-d'} className="open"><td colSpan={9}>
+                      <dl className="detail">
+                        <div><dt>WhatsApp</dt><dd>{c.phone ? <a className="link" href={wa(c.phone)} target="_blank" rel="noopener">{c.phone}</a> : '—'}</dd></div>
+                        <div><dt>Langues</dt><dd>{c.languages.join(', ') || '—'}</dd></div>
+                        <div><dt>Vidéos</dt><dd>{c.portfolio_url ? <a className="link" href={c.portfolio_url} target="_blank" rel="noopener nofollow">Ouvrir le lien</a> : 'Pas de lien'}</dd></div>
+                        <div><dt>Options</dt><dd>{(pkBy[c.id] || []).filter((p) => p.option_key && p.active).map((p) => `${p.title} +${dh(p.price_mad)}`).join(' · ') || 'Aucune'}</dd></div>
+                        <div><dt>Parrainé par</dt><dd>{c.referred_by || '—'} · code {c.referral_code}</dd></div>
+                        <div><dt>Campagne</dt><dd>{[c.utm?.utm_campaign, c.utm?.utm_content].filter(Boolean).join(' / ') || '—'}</dd></div>
+                        <div className="wide"><dt>Présentation</dt><dd>{c.bio || '—'}</dd></div>
+                        <label className="f wide"><span>Message au créateur <em>(visible dans son espace)</em></span><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex. Ajoute 2 vidéos face caméra avec un meilleur son." /></label>
+                        <div className="wide toolbar">
+                          <button className="btn sm ink" onClick={() => setCreator(c, 'approved')}>Vérifier</button>
+                          <button className="btn sm quiet" onClick={() => setCreator(c, 'rejected')}>Refuser</button>
+                          {c.status !== 'pending' ? <button className="btn sm quiet" onClick={() => setCreator(c, 'pending')}>Remettre à vérifier</button> : null}
+                          {c.phone ? <a className="btn sm quiet" href={wa(c.phone, `Bonjour ${c.first_name}, c’est l’équipe Kivora.`)} target="_blank" rel="noopener">Écrire sur WhatsApp</a> : null}
+                        </div>
+                      </dl>
+                    </td></tr>
+                  ) : null,
+                ];
+              })}</tbody>
+            </table></div>
+          )}
+        </>)}
+
+        {tab === 'marques' && (<>
+          <div className="apphead"><h1>Marques</h1><p>Ouvre l’accès au catalogue marque par marque, après la démo.</p></div>
+          <div className="toolbar">
+            <div className="seg" role="group" aria-label="Accès">
+              {([['all', 'Toutes'], ['waitlist', 'Liste d’attente'], ['active', 'Accès ouvert']] as const).map(([s, l]) => <button key={s} aria-pressed={bFilter === s} onClick={() => setBFilter(s)}>{l} ({s === 'all' ? br.length : br.filter((b) => b.status === s).length})</button>)}
+            </div>
+            <input type="search" placeholder="Marque, contact, secteur…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <button className="btn sm quiet" onClick={exportBrands}>Exporter en CSV</button>
+          </div>
+          {bRows.length === 0 ? <p className="empty">{br.length === 0 ? 'Aucune marque pour l’instant.' : 'Aucune marque dans cette liste.'}</p> : (
+            <div className="tbl"><table>
+              <thead><tr><th>Marque</th><th>Contact</th><th>Secteur</th><th>Budget</th><th>Demandes</th><th>Accès</th><th>Inscrite</th><th /></tr></thead>
+              <tbody>{bRows.map((b) => (
+                <tr key={b.id}>
+                  <td><b style={{ fontWeight: 500 }}>{b.company}</b><span className="sub">{b.website}</span><span className="sub">{b.ice ? `ICE ${b.ice}` : ''}</span></td>
+                  <td>{b.contact_name}<span className="sub">{b.profiles?.email}</span><span className="sub">{b.phone ? <a className="link" href={wa(b.phone)} target="_blank" rel="noopener">{b.phone}</a> : null}</span></td>
+                  <td>{b.sector}</td>
+                  <td>{b.monthly_budget || '—'}</td>
+                  <td>{reqCount(b.id) ? <button className="link" onClick={() => { setRFilter('toutes'); setTab('demandes'); setTimeout(() => setQ(b.company), 0); }}>{reqCount(b.id)}</button> : '0'}</td>
+                  <td><span className={`tag ${b.status === 'active' ? 'good' : 'warn'}`}>{b.status === 'active' ? 'Ouvert' : 'Attente'}</span></td>
+                  <td>{fmtDate(b.created_at)}<span className="sub">{b.utm?.utm_source || 'direct'}</span></td>
+                  <td>{b.status === 'active'
+                    ? <button className="btn sm quiet" onClick={() => setBrand(b, 'waitlist')}>Retirer l’accès</button>
+                    : <button className="btn sm ink" onClick={() => setBrand(b, 'active')}>Ouvrir l’accès</button>}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+          )}
+        </>)}
+
+        {tab === 'demandes' && (<>
+          <div className="apphead"><h1>Demandes de réservation</h1><p>Fais avancer chaque demande ; la marque voit le statut et ta note dans son espace, le créateur la voit dès qu’elle est confirmée.</p></div>
+          {!requestsReady ? <p className="empty">La table des demandes n’existe pas encore. Applique le script <b>supabase/migrations/09_booking_requests.sql</b> dans Supabase › SQL Editor.</p> : (<>
+            <div className="tiles">
+              <div className="hi"><b>{openReq.length}</b><span>demandes ouvertes · {newReq} nouvelle{newReq > 1 ? 's' : ''}</span></div>
+              <div><b>{paidReq.length}</b><span>payées ou plus</span></div>
+              <div><b>{delivered.length}</b><span>vidéos livrées</span></div>
+              <div><b>{dh(gmv)}</b><span>réservé (prix créateurs)</span></div>
+            </div>
+            <div className="toolbar">
+              <select aria-label="Statut" value={rFilter} onChange={(e) => setRFilter(e.target.value)}>
+                <option value="ouvertes">Ouvertes ({openReq.length})</option><option value="toutes">Toutes ({rq.length})</option>
+                {[...STATUS_FLOW, 'annulee'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s]} ({rq.filter((r) => r.status === s).length})</option>)}
+              </select>
+              <input type="search" placeholder="Marque, créateur, produit…" value={q} onChange={(e) => setQ(e.target.value)} />
+              <button className="btn sm quiet" onClick={exportRequests}>Exporter en CSV</button>
+            </div>
+            {rRows.length === 0 ? <p className="empty">{rq.length === 0 ? 'Aucune demande pour l’instant. Elles arrivent quand une marque active clique sur « Demander une vidéo ».' : 'Aucune demande dans cette liste.'}</p>
+              : rRows.map((r) => {
+                const b = brandById[r.brand_id]; const c = creatorById[r.creator_id];
+                return (
+                  <article className="rq" key={r.id}>
+                    <div className="rq-h">
+                      <div><b>{r.brand_company} → {r.creator_label}</b><span>{new Date(r.created_at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span></div>
+                      <span className="amt">{dh(r.total_mad)}</span>
+                    </div>
+                    <RequestSteps status={r.status} />
+                    {r.options?.length ? <div className="rq-opts"><span>Vidéo {dh(r.base_price)}</span>{r.options.map((o) => <span key={o.key}>{o.title} +{dh(o.price_mad)}</span>)}</div> : <div className="rq-opts"><span>Vidéo {dh(r.base_price)}, sans option</span></div>}
+                    {r.brief ? <p className="small" style={{ whiteSpace: 'pre-line' }}>{r.brief}</p> : null}
+                    <div className="toolbar rq-table">
+                      <select aria-label="Statut" value={r.status} onChange={(e) => setRequest(r, { status: e.target.value })}>
+                        {[...STATUS_FLOW, 'annulee'].map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+                      </select>
+                      {b?.phone ? <a className="btn sm quiet" href={wa(b.phone, `Bonjour ${b.contact_name || ''}, c’est l’équipe Kivora au sujet de votre demande avec ${r.creator_label}.`)} target="_blank" rel="noopener">WhatsApp marque</a> : null}
+                      {c?.phone ? <a className="btn sm quiet" href={wa(c.phone, `Bonjour ${c.first_name}, une marque (${r.brand_company}) souhaite réserver une vidéo avec toi.`)} target="_blank" rel="noopener">WhatsApp créateur</a> : null}
+                    </div>
+                    <form className="savebar" onSubmit={(e) => { e.preventDefault(); const v = (e.currentTarget.elements.namedItem('note') as HTMLInputElement).value; setRequest(r, { admin_note: v.trim() || null }); }}>
+                      <label className="f" style={{ flex: 1, minWidth: 220 }}><span className="sr">Note pour la marque</span><input name="note" defaultValue={r.admin_note || ''} placeholder="Note visible par la marque (ex. devis envoyé par e-mail)" /></label>
+                      <button className="btn sm ink">Enregistrer la note</button>
+                    </form>
+                  </article>
+                );
+              })}
+          </>)}
+        </>)}
+      </main>
       {toast ? <div className="toast" role="status">{toast}</div> : null}
-    </main>
+    </div>
   );
 }
